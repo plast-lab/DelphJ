@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<project basedir="." default="build" name="Reference">
+  <property environment="env"/>
+  <property name="debuglevel" value="source,lines,vars"/>
+  <path id="Reference.classpath">
+    <pathelement location="bin"/>
+  </path>
+  <target name="init">
+    <echo message="Creating bin directory and gathering src files" />
+    <mkdir dir="bin"/>
+    <copy includeemptydirs="false" todir="bin">
+      <fileset dir="src">
+        <exclude name="**/*.launch"/>
+        <exclude name="**/*.java"/>
+      </fileset>
+    </copy>
+  </target>
+  <target name="clean">
+    <delete dir="bin"/>
+  </target>
+  <target depends="clean" name="cleanall"/>
+  <target depends="init" name="build">
+    <echo message="${ant.project.name}: ${ant.file}"/>
+    <javac destdir="bin" includeantruntime="false">
+      <src path="src"/>
+      <classpath refid="Reference.classpath"/>
+    </javac>
+  </target>
+</project>

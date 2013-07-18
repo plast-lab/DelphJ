@@ -1,0 +1,559 @@
+import java.util.*;
+
+aspect MJPattern {
+    
+    public interface PatternVariable {}
+    PatternTypeVariable implements PatternVariable;
+    PatternNameVariable implements PatternVariable;
+
+    // whether a piece of code is reflectively declared.
+    syn lazy boolean BodyDecl.isReflectiveDecl() = false;
+    eq StaticForMethodDecl.isReflectiveDecl() = true;
+    eq StaticForConstructorDecl.isReflectiveDecl() = true;
+    eq StaticForFieldDeclaration.isReflectiveDecl() = true;
+    syn lazy boolean TypeDecl.isReflectiveDecl() = false;
+
+    //    public boolean Variable.isReflectiveDecl();
+    syn lazy boolean ParameterDeclaration.isReflectiveDecl() = false;
+
+    /**
+     * Specifies whether a Stmt is a reflectively declared statement --
+     * this does not include stmts that are within a reflectively declared
+     * method.
+     **/
+    inh boolean Stmt.isReflectiveStmt();
+    eq StaticForStmt.getStmt(int index).isReflectiveStmt() = true;
+    eq Block.getStmt(int index).isReflectiveStmt() = isReflectiveStmt();
+    eq TryStmt.getCatchClause(int index).isReflectiveStmt() = isReflectiveStmt();
+    inh boolean CatchClause.isReflectiveStmt();
+
+    eq CatchClause.getBlock().isReflectiveStmt() = isReflectiveStmt();
+    eq LabeledStmt.getStmt().isReflectiveStmt() = isReflectiveStmt();
+    eq EnhancedForStmt.getStmt().isReflectiveStmt() = isReflectiveStmt();
+    eq ForStmt.getInitStmt(int index).isReflectiveStmt() = isReflectiveStmt();
+    eq ForStmt.getStmt().isReflectiveStmt() = isReflectiveStmt();
+    eq ForStmt.getUpdateStmt(int index).isReflectiveStmt() = isReflectiveStmt();
+    eq WhileStmt.getStmt().isReflectiveStmt() = isReflectiveStmt();
+    eq ConstructorDecl.getConstructorInvocation().isReflectiveStmt() = false;
+
+    eq ConstructorDecl.getBlock().isReflectiveStmt() = false;
+    eq MethodDecl.getBlock().isReflectiveStmt() = false;
+    
+    syn lazy boolean VariableDeclaration.isReflectiveDecl() = isReflectiveStmt();
+    /**********/
+
+    syn lazy IteratorDecl BodyDecl.refIterator() = null;
+    eq StaticForMethodDecl.refIterator() = getIteratorDecl();
+    eq StaticForConstructorDecl.refIterator() = getIteratorDecl();
+    eq StaticForFieldDeclaration.refIterator() = getIteratorDecl();
+    eq GroundedStaticForMethodDecl.refIterator() = original.refIterator();
+    //    eq ExpandedMethodDecl.refIterator() = original.refIterator();
+    //    eq StaticForMethodDeclSubstituted.refIterator() = original.refIterator();
+
+    eq StaticForMethodDecl.getBlock().enclosingRefIterator() = getIteratorDecl();
+    eq StaticForMethodDecl.getTypeAccess().enclosingRefIterator() = getIteratorDecl();
+    eq StaticForMethodDecl.getParameter(int i).enclosingRefIterator() = getIteratorDecl();
+    eq StaticForMethodDecl.getException(int i).enclosingRefIterator() = getIteratorDecl();
+
+    eq StaticForConstructorDecl.getBlock().enclosingRefIterator() = getIteratorDecl();
+    eq StaticForConstructorDecl.getParameter(int i).enclosingRefIterator() = getIteratorDecl();
+    eq StaticForConstructorDecl.getException(int i).enclosingRefIterator() = getIteratorDecl();
+
+    eq StaticForFieldDeclaration.getTypeAccess().enclosingRefIterator() = getIteratorDecl();
+    eq StaticForFieldDeclaration.getInit().enclosingRefIterator() = getIteratorDecl();
+
+    public IteratorDecl Variable.getEnclosingRefIterator() {
+        return enclosingRefIterator();
+    }
+
+    inh IteratorDecl IteratorDecl.enclosingRefIterator();
+    inh IteratorDecl Stmt.enclosingRefIterator();
+    inh IteratorDecl BodyDecl.enclosingRefIterator();
+
+    eq StaticForStmt.getStmt(int index).enclosingRefIterator() = getIteratorDecl();
+
+    syn lazy IteratorDecl Stmt.refIterator() = null;
+    eq StaticForStmt.refIterator() = getIteratorDecl();
+
+    //inh IteratorDecl Expr.enclosingRefIterator();
+    syn lazy IteratorDecl Expr.enclosingRefIterator() {
+	if ( enclosingStmt() != null )
+	    return enclosingStmt().enclosingRefIterator();
+	else if ( enclosingBodyDecl() != null )
+	    return enclosingBodyDecl().refIterator();
+	return null;
+    }
+
+    inh IteratorDecl Pattern.enclosingRefIterator();
+    eq IteratorDecl.getPattern().enclosingRefIterator() = this;
+    eq IteratorDecl.getNestedPattern(int i).enclosingRefIterator() = this;
+    inh IteratorDecl PatternNameVariable.enclosingRefIterator();
+    eq IteratorDecl.getPatternNameParameter(int i).enclosingRefIterator() = this;
+    inh IteratorDecl PatternTypeVariable.enclosingRefIterator();
+    eq IteratorDecl.getPatternTypeParameter(int i).enclosingRefIterator() = this;
+    eq Program.getChild().enclosingRefIterator() = null;
+
+    syn IteratorDecl StaticFieldPattern.enclosingRefIterator() = null;
+    syn IteratorDecl StaticMethodPattern.enclosingRefIterator() = null;
+
+    inh IteratorDecl ParameterDeclaration.enclosingRefIterator();
+    eq MethodDecl.getParameter(int i).enclosingRefIterator() = null;
+    eq CatchClause.getParameter().enclosingRefIterator() = enclosingRefIterator();
+
+    inh IteratorDecl CatchClause.enclosingRefIterator();
+    eq TryStmt.getCatchClause(int i).enclosingRefIterator() = enclosingRefIterator();
+
+    // get the enclosing reflective base type
+    syn lazy TypeDecl BodyDecl.reflectiveBaseType() =
+	refIterator() != null ? refIterator().getPattern().reflectiveBaseType() : null;
+
+    syn lazy TypeDecl Pattern.reflectiveBaseType() = getBaseSet().getTypeAccess().type();
+    eq EmptyPrimaryPattern.reflectiveBaseType() = null;
+
+    syn lazy TypeDecl Stmt.reflectiveBaseType() = enclosingRefIterator() != null ? enclosingRefIterator().getPattern().reflectiveBaseType() : null;
+
+    syn lazy TypeDecl IteratorDecl.reflectiveBaseType() = getPattern().reflectiveBaseType();
+
+    inh TypeDecl PatternNameVariable.reflectiveBaseType();
+    eq IteratorDecl.getPatternNameParameter(int i).reflectiveBaseType() = getPattern().reflectiveBaseType();
+
+    // get enclosing pattern name variables.
+    syn lazy Collection BodyDecl.patternNameVariables() =
+	refIterator() != null ? refIterator().patternNameVariables() : new ArrayList();
+
+    syn lazy Collection IteratorDecl.patternNameVariables() {
+    	Collection c = new ArrayList();
+    	for ( int i=0; i<getNumPatternNameParameter(); i++) 
+    	    c.add(getPatternNameParameter(i));
+    	return c;
+    }
+
+    inh Collection Pattern.patternNameVariables();
+    eq IteratorDecl.getPattern().patternNameVariables() = patternNameVariables();
+    // The only name variables that are still variables for nested pattern
+    // are the ones not bounded by the primary pattern.
+    eq IteratorDecl.getNestedPattern(int i).patternNameVariables() = unboundNameVariables();
+
+    syn lazy Collection IteratorDecl.unboundNameVariables() {
+    	Pattern p = getPattern();
+    	Collection unbound = new ArrayList(patternNameVariables());
+    	p.removeBoundNameVariables(unbound);
+
+    	return unbound;
+    }
+
+    public void Pattern.removeBoundNameVariables(Collection unbound) {
+	   throw new Error("Unsupported method removeBoundNameVariables by " + getClass().getName());
+    }
+    public void MethodPattern.removeBoundNameVariables(Collection unbound) {
+	   unbound.remove(getNameVariable(getID()));
+    }
+    public void FieldPattern.removeBoundNameVariables(Collection unbound) {
+	   unbound.remove(getNameVariable(getID()));
+    }
+    public void EmptyPrimaryPattern.removeBoundNameVariables(Collection unbound) {}
+
+    eq IteratorDecl.getPattern().unboundNameVariables() = unboundNameVariables();
+    eq IteratorDecl.getNestedPattern(int i).unboundNameVariables() = unboundNameVariables();
+    inh Collection Pattern.unboundNameVariables();
+
+    syn lazy Collection IteratorDecl.unboundTypeVariables() {
+	Pattern p = getPattern();
+	Collection typeVars = patternTypeVariables();
+	Collection unbound = new ArrayList(typeVars);
+
+	p.removeBoundTypeVariables(unbound);
+	   return unbound;
+    }
+    eq IteratorDecl.getPattern().unboundTypeVariables() = unboundTypeVariables();
+    eq IteratorDecl.getNestedPattern(int i).unboundTypeVariables() = unboundTypeVariables();
+    
+    public void Pattern.removeBoundTypeVariables(Collection unbound) {
+	   throw new Error("Unsupported method removeBoundTypeVariables by " +
+			getClass().getName());
+    }
+    public void EmptyPrimaryPattern.removeBoundTypeVariables(Collection unbound) {}
+    public void MethodPattern.removeBoundTypeVariables(Collection unbound) {
+    	getTypeAccess().type().removeBoundTypeVariables(unbound);
+    	for ( int i=0; i<getNumParameter(); i++) {
+    	    getParameter(i).type().removeBoundTypeVariables(unbound);
+    	}
+    	for ( int i=0; i<getNumException(); i++) {
+    	    getException(i).type().removeBoundTypeVariables(unbound);
+    	}
+    }
+    public void FieldPattern.removeBoundTypeVariables(Collection unbound) {
+	   getTypeAccess().type().removeBoundTypeVariables(unbound);
+    }
+    inh Collection Pattern.unboundTypeVariables();
+
+    public void TypeDecl.removeBoundTypeVariables(Collection c ) {
+	   c.remove(this);
+    }
+    public void ParTypeDecl.removeBoundTypeVariables(Collection c) {
+    	for ( int i=0; i<getNumArgument(); i++) {
+    	    getArgument(i).type().removeBoundTypeVariables(c);
+    	}
+    }
+
+    syn lazy Collection Stmt.patternNameVariables() = enclosingBodyDecl().patternNameVariables();
+    syn lazy Collection Expr.patternNameVariables() = enclosingStmt().patternNameVariables();
+
+    // get enclosing pattern type variables.
+    syn lazy Collection BodyDecl.patternTypeVariables() =
+	refIterator() != null ? refIterator().patternTypeVariables() : new ArrayList();
+
+    syn lazy Collection IteratorDecl.patternTypeVariables() {
+    	Collection c = new ArrayList();
+    	for ( int i=0; i<getNumPatternTypeParameter(); i++) 
+    	    c.add(getPatternTypeParameter(i));
+    	return c;
+    }
+    inh Collection Pattern.patternTypeVariables();
+    eq IteratorDecl.getPattern().patternTypeVariables() = patternTypeVariables();
+    eq IteratorDecl.getNestedPattern(int i).patternTypeVariables() = unboundTypeVariables();
+
+    inh Collection Stmt.patternTypeVariables();
+    eq StaticForMethodDecl.getBlock().patternTypeVariables() = patternTypeVariables();
+    eq StaticForConstructorDecl.getBlock().patternTypeVariables() = patternTypeVariables();
+    eq StaticForStmt.getStmt(int i).patternTypeVariables() = getIteratorDecl().patternTypeVariables();
+    eq Block.getStmt(int i).patternTypeVariables() = patternTypeVariables();
+    eq Program.getChild(int i).patternTypeVariables() = new ArrayList();
+
+    syn lazy Collection Expr.patternTypeVariables() = enclosingStmt().patternNameVariables();
+
+    // determines whether a name is a name variable.
+    syn lazy boolean BodyDecl.isNameVariable(String name) {
+    	Collection c = patternNameVariables();
+    	for ( Iterator nameIt = c.iterator(); nameIt.hasNext(); ) {
+    	    if ( ((PatternNameVariable) nameIt.next()).getID().equals(name))
+    		return true;
+    	}
+    	return false;
+    }
+
+    //    eq ExpandedMethodDecl.isNameVariable(String name) = original.isNameVariable(name);
+    // eq StaticForMethodDeclSubstituted.isNameVariable(String name) = original.isNameVariable(name);
+
+    inh boolean Stmt.isNameVariable(String name);
+    eq StaticForStmt.getStmt(int index).isNameVariable(String name) =
+	getIteratorDecl().isLocalNameVariable(name) || isNameVariable(name);
+    eq StaticForMethodDecl.getBlock().isNameVariable(String name) =
+	getIteratorDecl().isNameVariable(name);
+    eq StaticForConstructorDecl.getBlock().isNameVariable(String name) =
+	getIteratorDecl().isNameVariable(name);
+    eq Block.getStmt(int i).isNameVariable(String name) {
+    	if ( getStmt(i) instanceof StaticForStmt ) {
+    	    if ( ((StaticForStmt) getStmt(i)).getIteratorDecl().isNameVariable(name))
+    		return true;
+    	}
+    	return isNameVariable(name);
+    }
+    eq Program.getChild(int i).isNameVariable(String name) = false;
+
+    syn lazy boolean IteratorDecl.isLocalNameVariable(String name) {
+    	for ( int i=0; i<getNumPatternNameParameter(); i++)
+    	    if (getPatternNameParameter(i).getID().equals(name))
+    		return true;
+    	return false;
+    }
+    syn lazy boolean IteratorDecl.isNameVariable(String name) = isLocalNameVariable(name) || (enclosingRefIterator() != null && enclosingRefIterator().isNameVariable(name));
+    syn lazy boolean Expr.isNameVariable(String name) = 
+	enclosingStmt() != null && enclosingStmt().isNameVariable(name);
+    syn lazy boolean Pattern.isNameVariable(String name) = enclosingBodyDecl().isNameVariable(name);
+
+
+    // determines whether a name contains name variable.
+    syn lazy boolean BodyDecl.containsNameVariable(String name) {
+	Identifier id = new Identifier(name, refIterator());
+	return id.isNameVariable();
+    }
+    //    eq ExpandedMethodDecl.containsNameVariable(String name) = original.containsNameVariable(name);
+    //    eq StaticForMethodDeclSubstituted.containsNameVariable(String name) = original.containsNameVariable(name);
+
+    inh boolean Stmt.containsNameVariable(String name);
+    eq StaticForStmt.getStmt(int index).containsNameVariable(String name) =
+	getIteratorDecl().isLocalNameVariable(name) || containsNameVariable(name);
+    eq StaticForMethodDecl.getBlock().containsNameVariable(String name) =
+	getIteratorDecl().containsNameVariable(name);
+    eq StaticForConstructorDecl.getBlock().containsNameVariable(String name) =
+	getIteratorDecl().containsNameVariable(name);
+    eq Block.getStmt(int i).containsNameVariable(String name) {
+    	if ( getStmt(i) instanceof StaticForStmt ) {
+    	    if ( ((StaticForStmt) getStmt(i)).getIteratorDecl().containsNameVariable(name))
+    		  return true;
+    	}
+    	return containsNameVariable(name);
+    }
+    eq Program.getChild(int i).containsNameVariable(String name) = false;
+
+    syn lazy boolean IteratorDecl.containsNameVariable(String name) {
+    	Identifier id = new Identifier(name, this);
+    	return id.isNameVariable();
+    }
+    syn lazy boolean Expr.containsNameVariable(String name) = 
+	enclosingStmt() != null && enclosingStmt().containsNameVariable(name);
+    syn lazy boolean Pattern.containsNameVariable(String name) = enclosingBodyDecl().containsNameVariable(name);
+
+
+    // returns the name variable by the ID name.
+    syn lazy PatternNameVariable BodyDecl.getNameVariable(String name) {
+    	Collection c = patternNameVariables();
+    	for ( Iterator nameIt = c.iterator(); nameIt.hasNext(); ) {
+    	    PatternNameVariable p = (PatternNameVariable) nameIt.next();
+    	    if ( p.getID().equals(name)) return p;
+    	}
+    	return null;
+    }
+    //    eq ExpandedMethodDecl.getNameVariable(String name) = original.getNameVariable(name);
+    eq StaticForMethodDecl.getNameVariable(String name) = original.getNameVariable(name);
+
+    syn lazy PatternNameVariable Expr.getNameVariable(String name) = enclosingStmt().getNameVariable(name);
+
+    inh PatternNameVariable Stmt.getNameVariable(String name);
+    eq StaticForStmt.getStmt(int index).getNameVariable(String name) =
+	getIteratorDecl().isLocalNameVariable(name) ?
+	getIteratorDecl().getLocalNameVariable(name) : getNameVariable(name);
+    eq StaticForMethodDecl.getBlock().getNameVariable(String name) =
+	getIteratorDecl().getNameVariable(name);
+    eq StaticForConstructorDecl.getBlock().getNameVariable(String name) =
+	getIteratorDecl().getNameVariable(name);
+    eq Block.getStmt(int i).getNameVariable(String name) = getNameVariable(name);
+    eq Program.getChild(int i).getNameVariable(String name) = null;
+
+    syn lazy PatternNameVariable IteratorDecl.getLocalNameVariable(String name) {
+    	for ( int i=0; i<getNumPatternNameParameter(); i++)
+    	    if (getPatternNameParameter(i).getID().equals(name))
+    		return getPatternNameParameter(i);
+    	return null;
+    }
+    syn lazy PatternNameVariable IteratorDecl.getNameVariable(String name) {
+    	if ( isLocalNameVariable(name))
+    	    return getLocalNameVariable(name);
+    	if ( enclosingRefIterator() != null )
+    	    return enclosingRefIterator().getNameVariable(name);
+    	return null;
+    }
+
+    inh PatternNameVariable Pattern.getNameVariable(String name);
+    eq IteratorDecl.getPattern().getNameVariable(String name) = getNameVariable(name);
+    eq IteratorDecl.getNestedPattern(int i).getNameVariable(String name) = getNameVariable(name);
+
+    syn lazy PatternMethodDecl Pattern.patternMethodDecl() {
+	   throw new Error("patternMethodDecl can only be retrieve for MethodPatterns");
+    }
+    // returns a "fake" MethodDecl determined by the pattern of the iterator.
+    eq MethodPattern.patternMethodDecl() {
+    	List<Access> paramTypes = getParameterList();
+    	// turn types into a list of ParameterDeclarations.
+    	List<ParameterDeclaration> params = new List();
+    	for ( int i=0; i<paramTypes.getNumChild(); i++) {
+    	    params.add(new ParameterDeclaration((Access)paramTypes.getChild(i).fullCopy(), "p" + i));
+    	}
+
+    	PatternMethodDecl pd = 
+    	    new PatternMethodDecl((Modifiers) getModifiers().fullCopy(),
+    				  (Access) getTypeAccess().fullCopy(),
+    				  getID(), 
+    				  params,
+    				  (List) getExceptionList().fullCopy(),
+    				  new Opt());
+    	
+    	pd.is$Final = true;
+    	pd.bypassErrorChecking = true;
+
+    	setPatternMethodDecl(pd);
+
+    	return pd;
+    }
+
+    syn lazy PatternFieldDeclaration Pattern.patternFieldDeclaration() {
+	   throw new Error("patternFieldDecl can only be retrieved for FieldPattern");
+    }
+    eq FieldPattern.patternFieldDeclaration() {
+    	PatternFieldDeclaration fd = 
+    	    new PatternFieldDeclaration((Modifiers) getModifiers().fullCopy(),
+    					(Access) getTypeAccess().fullCopy(),
+    					getID(),
+    					new Opt());
+    	fd.is$Final = true;
+    	fd.bypassErrorChecking = true;
+    	
+    	setPatternFieldDeclaration(fd);
+    	return fd;
+    }
+
+    syn TypeDecl PatternMethodDecl.hostType() = reflectiveBaseType();
+    syn String PatternMethodDecl.hostPackage() = reflectiveBaseType().hostPackage();
+    eq PatternMethodDecl.refIterator() = 
+	((Pattern) parent.parent).enclosingRefIterator();
+    eq PatternFieldDeclaration.refIterator() = 
+	((Pattern) parent.parent).enclosingRefIterator();
+
+    syn lazy boolean TypeDecl.isVectorTypeVariable() = false;
+    eq VectorTypeVariable.isVectorTypeVariable() = true;
+
+    syn lazy boolean TypeDecl.isPatternTypeVariable() = false;
+    eq PatternTypeVariable.isPatternTypeVariable() = true;
+
+    // return the pattern conditions.
+    syn Collection IteratorDecl.getPatternConditions() {
+    	Collection l = new ArrayList();
+    	l.add(getPattern());
+    	
+    	for ( int i=0; i<getNumNestedPattern(); i++)
+    	    l.add(getNestedPattern(i));
+    	return l;
+    }
+
+    syn Collection BodyDecl.patternConditions() = Collections.EMPTY_LIST;
+    eq MethodDecl.patternConditions() {
+    	Collection l = new ArrayList();
+
+    	ArrayList params = parameterTypes();
+    	List paramTypes = new List();
+    	for ( int i=0; i<params.size(); i++)
+    	    paramTypes.add(((TypeDecl) params.get(i)).createBoundAccess());
+
+    	ArrayList exceptions = exceptionTypes();
+    	List expTypes = new List();
+    	for ( int i=0; i<exceptions.size(); i++)
+    	    expTypes.add(((TypeDecl) exceptions.get(i)).createBoundAccess());
+
+    	StaticMethodPattern mp = 
+    	    new StaticMethodPattern(new BaseSet(hostType().createBoundAccess(),
+    					  new RefElmt("methods")),
+    				    (Modifiers) getModifiers().fullCopy(),
+    				    type().createBoundAccess(),
+    				    getID(), paramTypes, expTypes, new Opt(), new List());
+    	/*
+    	IteratorDecl fakeId = new IteratorDecl(new List(), new List(), 
+    					       mp, new List());
+    	*/
+    	l.add(mp);
+    	return l;
+    }
+
+    eq StaticForMethodDecl.patternConditions() {
+        // TODO: nested patterns have more conditions.
+        return refIterator().getPatternConditions();
+    }
+    eq StaticForFieldDeclaration.patternConditions() = refIterator().getPatternConditions();
+    eq FieldDeclaration.patternConditions() {
+    	Collection l = new ArrayList();
+    	l.add(new StaticFieldPattern(new BaseSet(hostType().createBoundAccess(),
+    						 new RefElmt("fields")),
+    				     (Modifiers) getModifiers().fullCopy(),
+    				     type().createBoundAccess(),
+    				     getID(), new Opt(), new List()));
+    	return l;
+    }
+
+    syn lazy boolean Pattern.isPositiveCondition() = true;
+
+    // Whether a Nested pattern is "positive" depends on whether it is an
+    // error condition. Being an error condition reverses the actual assumed
+    // condition.
+    syn lazy boolean NestedMethodPattern.isPositiveCondition() = getIsPositive() ^ getIsErrorCondition();
+    syn lazy boolean NestedFieldPattern.isPositiveCondition() = getIsPositive() ^ getIsErrorCondition();
+
+    syn lazy boolean Pattern.isErrorCondition() = false;
+    syn lazy boolean NestedMethodPattern.isErrorCondition() = getIsErrorCondition();
+    syn lazy boolean NestedFieldPattern.isErrorCondition() = getIsErrorCondition();
+    
+    syn lazy TypeDecl BaseSet.type() = getTypeAccess().type();
+    
+    syn lazy boolean PatternTypeVariable.matchingException() =	enclosingRefIterator().exceptionParameter(this);
+
+    syn lazy boolean IteratorDecl.exceptionParameter(TypeVariable t) {
+    	if ( getPattern().exceptionParameter(t))
+    	    return true;
+    	for ( int i=0; i<getNumNestedPattern(); i++) {
+    	    if ( getNestedPattern(i).exceptionParameter(t))
+    		return true;
+    	}
+    	return false;
+    }
+    syn lazy boolean Pattern.exceptionParameter(TypeVariable t) = false;
+    eq MethodPattern.exceptionParameter(TypeVariable t) {
+    	for ( int i=0; i<getNumException(); i++) {
+    	    if (getException(i).type() == t)
+    		return true;
+    	}
+    	return false;
+    }
+    public void TrueNestedPattern.transformation() {}
+
+    syn lazy boolean Pattern.isPositive() = true;
+    eq NestedMethodPattern.isPositive() = getIsPositive();
+    eq NestedFieldPattern.isPositive() = getIsPositive();
+
+    syn lazy boolean Pattern.isMethodPattern() = false;
+    eq MethodPattern.isMethodPattern () = true;
+    syn lazy boolean Pattern.isFieldPattern() = false;
+    eq FieldPattern.isFieldPattern() = true;
+
+    public Pattern Pattern.makeNestedPattern(boolean isPositive, boolean isErrorCondition) {
+	   throw new Error("makeNestedPattern(boolean) not supported by " +
+			getClass().getName());
+    }
+    public MethodPattern MethodPattern.makeNestedPattern(boolean isPositive, boolean isErrorCondition) {
+	   return new NestedMethodPattern(getBaseSet().fullCopy(), 
+				       getModifiers().fullCopy(), 
+				       (Access) getTypeAccess().fullCopy(), 
+				       getID(), 
+				       getParameterList().fullCopy(), 
+				       getExceptionList().fullCopy(), 
+				       new Opt(), new List(),
+				       isPositive, isErrorCondition);
+    }
+    public FieldPattern FieldPattern.makeNestedPattern(boolean isPositive, boolean isErrorCondition) {
+	   return new NestedFieldPattern(getBaseSet().fullCopy(), 
+				      getModifiers().fullCopy(), 
+				      (Access) getTypeAccess().fullCopy(), 
+				      getID(), new Opt(), 
+				      new List(), isPositive, isErrorCondition);
+    }
+
+    public void Pattern.flipSign() {
+	   throw new Error("flipSign() not supported by " +  getClass().getName());
+    }
+    public void NestedMethodPattern.flipSign() {
+	   setIsPositive(!getIsPositive());
+    }
+    public void NestedFieldPattern.flipSign() {
+	   setIsPositive(!getIsPositive());
+    }
+
+    syn lazy boolean IteratorDecl.iterateMethods() = getPattern().iterateMethods();
+    syn lazy boolean IteratorDecl.iterateFields() = getPattern().iterateFields();
+    syn lazy boolean Pattern.iterateMethods() = getBaseSet().iterateMethods();
+    eq EmptyPrimaryPattern.iterateMethods() = false;
+
+    syn lazy boolean Pattern.iterateFields() = getBaseSet().iterateFields();
+    eq EmptyPrimaryPattern.iterateFields() = false;
+
+    syn lazy boolean BaseSet.iterateMethods () = getRefElmt().getElmtName().equals("methods");
+    syn lazy boolean BaseSet.iterateFields () = getRefElmt().getElmtName().equals("fields");
+
+    public void EmptyPrimaryPattern.collectErrors() {}
+
+    public boolean Pattern.errorCondition;
+
+    // TrueIteratorDecl : used to guard regular, non-static code.
+    // This is useful in checking when unguarded code can refer to
+    // reflectively declared members : true when declaration is under
+    // errorif
+    public static TrueIteratorDecl IteratorDecl.TrueIteratorDecl =
+        new TrueIteratorDecl(
+            new List(), 
+            new List(), 
+            new EmptyPrimaryPattern(
+                new BaseSet(
+                    new AllMatchingTypeVariable(new Modifiers(), "", new List(), new List()).createBoundAccess(), 
+                    new RefElmt("methods"))), 
+            new List(), 
+            new List());
+
+    eq TrueIteratorDecl.isNameVariable(String name) = false;
+}

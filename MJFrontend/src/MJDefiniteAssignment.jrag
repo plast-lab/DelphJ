@@ -1,0 +1,10 @@
+aspect MJDefiniteAssignment {
+    eq StaticForStmt.isDAafter(Variable v) = getNumStmt() == 0 ? isDAbefore(v) : getStmt(getNumStmt()-1).isDAafter(v);
+
+    eq StaticForStmt.getStmt(int index).isDAbefore(Variable v) = index == 0 ? isDAbefore(v) : getStmt(index - 1).isDAafter(v);
+
+    eq StaticForStmt.isDUafter(Variable v) = getNumStmt() == 0 ? isDUbefore(v) : getStmt(getNumStmt()-1).isDUafter(v);
+
+    eq StaticForStmt.getStmt(int index).isDUbefore(Variable v) =
+	index == 0 ? isDUbefore(v) : getStmt(index-1).isDUafter(v);    
+}

@@ -1,0 +1,69 @@
+aspect MJLookupType {
+    private boolean Program.initMJSpecificTypes = false;
+    
+    public void Program.addMJTypes() {
+       if(!initMJSpecificTypes) {
+           initMJSpecificTypes = true;
+
+	         // add NonVoid and AllMatching
+           TypeDecl t = new NonVoidType(new Modifiers(), "NonVoid", new List());
+           addCompilationUnit(new CompilationUnit("mj.lang", new List(), new List().add(t)));
+       }
+   }
+
+   refine LookupType eq Program.lookupType(String packageName, String typeName) {
+       addMJTypes();
+       return LookupType.Program.lookupType(packageName, typeName);
+   }
+
+   syn SimpleSet IteratorDecl.localLookupType(String name) {
+       List patternTVs = getPatternTypeParameterList();
+       for (int i=0; i<patternTVs.getNumChild(); i++) {
+           if ( ((TypeVariable) patternTVs.getChild(i)).name().equals(name))
+              return SimpleSet.emptySet.add(patternTVs.getChild(i));
+      }
+      return SimpleSet.emptySet;
+  }
+
+  inh SimpleSet StaticForMethodDecl.lookupType(String name);
+  syn SimpleSet StaticForMethodDecl.localLookupType(String name) = getIteratorDecl().localLookupType(name);
+  eq StaticForMethodDecl.getChild().lookupType(String name) = localLookupType(name).isEmpty() ? lookupType(name) : localLookupType(name);
+
+  inh SimpleSet StaticForConstructorDecl.lookupType(String name);
+  syn SimpleSet StaticForConstructorDecl.localLookupType(String name) = getIteratorDecl().localLookupType(name);
+  eq StaticForConstructorDecl.getChild().lookupType(String name) = localLookupType(name).isEmpty() ? lookupType(name) : localLookupType(name);
+
+  inh SimpleSet StaticForFieldDeclaration.lookupType(String name);
+  syn SimpleSet StaticForFieldDeclaration.localLookupType(String name) = getIteratorDecl().localLookupType(name);
+  eq StaticForFieldDeclaration.getChild().lookupType(String name) = localLookupType(name).isEmpty() ? lookupType(name) : localLookupType(name);
+
+
+  syn SimpleSet StaticForStmt.localLookupType(String name) = getIteratorDecl().localLookupType(name);
+  inh lazy SimpleSet StaticForStmt.lookupType(String name);
+  eq StaticForStmt.getStmt(int i).lookupType(String name) = 
+  localLookupType(name).isEmpty() ? 
+  lookupType(name) : localLookupType(name);
+
+
+  inh SimpleSet IteratorDecl.lookupType(String name);
+  eq IteratorDecl.getPattern().lookupType(String name) = localLookupType(name).isEmpty() ? lookupType(name) : localLookupType(name);
+  eq IteratorDecl.getNestedPattern(int i).lookupType(String name) = localLookupType(name).isEmpty() ? lookupType(name) : localLookupType(name);
+  eq IteratorDecl.getPatternTypeParameter(int i).lookupType(String name) = localLookupType(name).isEmpty() ? lookupType(name) : localLookupType(name);
+
+    // Made-up types. TODO: move into annotations.
+  syn lazy TypeDecl Program.typeNonVoid() = lookupType("mj.lang", "NonVoid");
+    /*
+	TypeDecl t = new NonVoidType(new Modifiers(), "NonVoid", new List());
+	addCompilationUnit(new CompilationUnit("mj.lang", new List(), new List().add(t)));
+	return t;
+    */
+
+  eq Program.getChild().typeNonVoid() = typeNonVoid();
+  inh lazy TypeDecl TypeDecl.typeNonVoid();
+
+  inh TypeDecl PatternTypeVariable.typeThrowable();
+  inh TypeDecl TypeDecl.typeThrowable();
+  inh TypeDecl Pattern.typeThrowable();
+
+  inh TypeDecl IteratorDecl.typeVoid();
+}

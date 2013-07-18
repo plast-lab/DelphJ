@@ -1,0 +1,213 @@
+aspect MJParameterization {
+	ParIteratorDecl implements Parameterization;
+
+	public boolean ParIteratorDecl.isRawType() { return false; }
+
+	public TypeDecl ParIteratorDecl.substitute(TypeVariable typeVariable) {
+		// check whether type variable is part of the original.
+		for ( int i=0; i<original.getNumPatternTypeParameter(); i++) {
+			if ( original.getPatternTypeParameter(i) == typeVariable )
+			// If part of the original, return the new one.
+				return getPatternTypeParameter(i);
+		}
+		return enclosingBodyDecl().hostType().substitute(typeVariable);
+	}
+
+
+	public BodyDecl StaticForMethodDecl.p(Parameterization parTypeDecl) {
+		ParIteratorDecl pId = getIteratorDecl().substitute(parTypeDecl);
+
+		StaticForMethodDeclSubstituted m = new StaticForMethodDeclSubstituted();
+		((TypeDecl)parTypeDecl).addBodyDecl(m);
+
+		m.setModifiers((Modifiers)getModifiers().fullCopy());
+		m.setID(getID());
+		m.setIteratorDecl(pId);
+
+		// substitute return types, parameters, exceptions with parTypeDecl.
+		Access retType = getTypeAccess().type().substituteReturnType(pId);
+		List pList = getParameterList().substitute(pId);
+		List eList = getExceptionList().substitute(pId);
+
+		m.setTypeAccess(retType);
+		m.setParameterList(pList);
+		m.setExceptionList(eList);
+
+		// TODO: this is not good enough for generic methods.
+		// Might need a StaticForGenericMethodDecl...
+		// What I really need is for StaticForMethodDecl to be a proxy for
+		// the underlying MethodDecl. But it is simply too hard to duplicate
+		// all the functionalities in MethodDecl.
+		// May be a nice functionality for JastAdd.
+
+		m.original = this;
+		m.parameterizedBy = parTypeDecl;
+		return m;
+	}
+
+	public BodyDecl StaticForFieldDeclaration.p(Parameterization parTypeDecl) {
+		ParIteratorDecl pId = getIteratorDecl().substitute(parTypeDecl);
+
+		StaticForFieldDeclarationSubstituted f = 
+		new StaticForFieldDeclarationSubstituted();
+		((TypeDecl)parTypeDecl).addBodyDecl(f);
+
+		f.setModifiers((Modifiers)getModifiers().fullCopy());
+		f.setID(getID());
+		f.setIteratorDecl(pId);
+
+		// substitute type.
+		Access ftype = getTypeAccess().type().substituteReturnType(pId);
+		f.setTypeAccess(ftype);
+
+		f.original = this;
+		f.parameterizedBy = parTypeDecl;
+
+		return f;
+	}
+
+	StaticForStmt SubstitutedStaticForStmt.original = null;
+
+    // StaticForStmt can be parameterized when the enclosing generic type
+    // is parameterized.
+	public SubstitutedStaticForStmt StaticForStmt.substitute(ParTypeDecl parTypeDecl) {
+		SubstitutedStaticForStmt p = new SubstitutedStaticForStmt(getIteratorDecl().substitute(parTypeDecl), new List(), new List());
+		p.original = this;
+		p.is$Final = true;
+
+		addSubstitutedStaticForStmt(p);
+
+		return p;
+	}
+
+	public ParIteratorDecl IteratorDecl.substitute(Parameterization parTypeDecl) {
+		ParIteratorDecl pid = new ParIteratorDecl();
+
+		for ( int i=0; i<getNumPatternTypeParameter(); i++) {
+			PatternTypeVariable t =(PatternTypeVariable) getPatternTypeParameter(i).fullCopy();
+			pid.addPatternTypeParameter(t.substitutePatternTypeVariable(parTypeDecl));
+		}
+		pid.setPatternNameParameterList(getPatternNameParameterList().fullCopy());
+
+		// create the mapping to be used for pattern and nested pattern
+		// substitution.
+		HashMap map = new HashMap();
+		for ( int i=0; i<getNumPatternTypeParameter(); i++)
+			map.put(getPatternTypeParameter(i), pid.getPatternTypeParameter(i));
+		for ( int i=0; i<getNumPatternNameParameter(); i++)
+			map.put(getPatternNameParameter(i), new Identifier(pid.getPatternNameParameter(i).getID(),pid));
+
+		pid.setPattern(getPattern().substitute(map).substitute(parTypeDecl));
+
+		for ( int i=0; i<getNumNestedPattern(); i++)
+			pid.addNestedPattern(getNestedPattern(i).substitute(map).substitute(parTypeDecl));
+
+		pid.original = this;
+		return pid;
+	}
+
+	public ParIteratorDecl IteratorDecl.lookupParIteratorDecl(ParTypeDecl parTypeDecl) {
+		for ( int i=0; i<getNumParIteratorDecl(); i++) {
+			ParIteratorDecl p = getParIteratorDecl(i);
+			if ( p.original == parTypeDecl )
+				return p;
+		}
+
+		// not found. make another one.
+		ParIteratorDecl p = (ParIteratorDecl) substitute(parTypeDecl);
+		addParIteratorDecl(p);
+		return p;
+	}
+
+	public PatternTypeVariable PatternTypeVariable.substitutePatternTypeVariable(Parameterization parTypeDecl) {
+		PatternTypeVariable tv = (PatternTypeVariable) fullCopy();
+		// substitute the bounds.
+		for ( int i=0; i<getNumTypeBound(); i++) 
+			tv.setTypeBound(getTypeBound(i).type().substitute(parTypeDecl), i);
+
+		return tv;
+	}
+
+	public IteratorDecl ParIteratorDecl.original;
+
+	public Pattern Pattern.substitute(Parameterization parTypeDecl) {
+		throw new Error("substitute(ParTypeDecl) unsupported by " +
+			getClass().getName());
+	}
+
+	public EmptyPrimaryPattern EmptyPrimaryPattern.substitute(Parameterization parTypeDecl) { 
+		return new EmptyPrimaryPattern(new BaseSet(new AllMatchingTypeVariable(new Modifiers(), "", new List(), new List()).createBoundAccess(), new RefElmt("methods")));
+	}
+
+    // TODO: need to recycle these substituted patterns. Might become
+    // a memory sucker.
+
+	public FieldPattern FieldPattern.substitute(Parameterization parTypeDecl) {
+		FieldPattern fp = new FieldPattern(getBaseSet().substitute(parTypeDecl),
+			(Modifiers) getModifiers().fullCopy(),
+			getTypeAccess().type().substitute(parTypeDecl),
+			getID(), new Opt(), new List());
+		fp.is$Final = true;
+		fp.bypassErrorChecking = true;
+
+		this.addSubFieldPattern(fp);
+		return fp;
+	}
+	public NestedFieldPattern NestedFieldPattern.substitute(Parameterization parTypeDecl) {
+		NestedFieldPattern nfp = 
+		new NestedFieldPattern(getBaseSet().substitute(parTypeDecl),
+			(Modifiers) getModifiers().fullCopy(),
+			getTypeAccess().type().substitute(parTypeDecl),
+			getID(), new Opt(), new List(),
+			getIsPositive(),
+			getIsErrorCondition());
+		nfp.is$Final = true;
+		nfp.bypassErrorChecking = true;
+		addSubFieldPattern(nfp);
+		return nfp;
+	}
+
+	public MethodPattern MethodPattern.substitute(Parameterization parTypeDecl) {
+		MethodPattern mp = 
+		new MethodPattern(getBaseSet().substitute(parTypeDecl),
+			(Modifiers) getModifiers().fullCopy(),
+			getTypeAccess().type().substitute(parTypeDecl),
+			getID(),
+			getParameterList().substitute(parTypeDecl),
+			getExceptionList().substitute(parTypeDecl),
+			new Opt(), new List());
+		mp.is$Final = true;
+		mp.bypassErrorChecking = true;
+
+		this.addSubMethodPattern(mp);
+		return mp;
+	}
+
+	public NestedMethodPattern NestedMethodPattern.substitute(Parameterization parTypeDecl) {
+		NestedMethodPattern nmp = 
+		new NestedMethodPattern(getBaseSet().substitute(parTypeDecl),
+			(Modifiers) getModifiers().fullCopy(),
+			getTypeAccess().type().substitute(parTypeDecl),
+			getID(),
+			getParameterList().substitute(parTypeDecl),
+			getExceptionList().substitute(parTypeDecl),
+			new Opt(), new List(),
+			getIsPositive(), getIsErrorCondition());
+		nmp.is$Final = true;
+		nmp.bypassErrorChecking = true;
+
+		this.addSubMethodPattern(nmp);
+		return nmp;
+	}
+	public TrueNestedPattern TrueNestedPattern.substitute(Parameterization parTypeDecl) {
+		TrueNestedPattern p = new TrueNestedPattern();
+		p.bypassErrorChecking = true;
+		return p;
+	}
+
+	public BaseSet BaseSet.substitute(Parameterization parTypeDecl) {
+		return new BaseSet(getTypeAccess().type().substitute(parTypeDecl),
+			(RefElmt) getRefElmt().fullCopy());
+	}
+
+}

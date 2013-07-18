@@ -1,0 +1,347 @@
+<!--
+    Targets for working from terminal window:
+    build (default) - generates java files and compiles them
+    clean           - removes all generated files and class files
+    Targets for working from Eclipse:
+    gen             - generates java files
+    genClean        - removes all generated files and their class files
+-->
+<project name="MJBackend" default="build">
+
+	<!-- current release version-->
+	<property name="version" value="0.31"/>
+
+	<!-- location of Java1.4Frontend -->
+	<property name="Java1.4Frontend" value="../../JastAddJ/Java1.4Frontend"/>
+
+	<!-- location of Java1.5Frontend -->
+	<property name="Java1.5Frontend" value="../../JastAddJ/Java1.5Frontend"/>
+
+	<!-- location of MJFrontend -->
+	<property name="MJFrontend" value="../../MJFrontend/src"/>
+
+	<!-- location of Java1.4Backend -->
+	<property name="Java1.4Backend" value="../../JastAddJ/Java1.4Backend"/>
+
+	<!-- location of Java1.5Backend -->
+	<property name="Java1.5Backend" value="../../JastAddJ/Java1.5Backend"/>
+
+	<!-- "package" is the directory where generated files will be stored -->
+	<property name="package" value="AST"/>
+
+	<!-- "tools" is the directory where generators and libraries are located. -->
+	<property name="tools" value="${Java1.4Frontend}/tools"/>
+
+	<property name="thirdparty" value="../thirdparty"/>
+
+	<!-- "jflex" is an ant task class for the scanner generator in JFlex.jar -->
+	<taskdef name="jflex" classname="JFlex.anttask.JFlexTask" classpath="${tools}/JFlex.jar"/>
+	<!-- "beaver" is an ant task class for the parser generator in beaver.jar -->
+	<taskdef name="beaver" classname="beaver.comp.run.AntTask" classpath="${tools}/beaver.jar"/>
+	<!-- "jastadd" is an ant task class in jastadd2.jar -->
+	<taskdef name="jastadd" classname="jastadd.JastAddTask" classpath="${tools}/jastadd2.jar"/>
+
+	<!-- compile sources -->
+	<target name="build" depends="gen">
+		<javac debug="true" nowarn="true" srcdir="." includes="**/*.java" excludes="testcases/**" classpath=".:${tools}/beaver-rt.jar:${tools}/junit.jar:${thirdparty}/asm-all-3.1.jar">
+		</javac>
+	</target>
+
+	<!-- generate compiler source files -->
+	<target name="gen" depends="scanner,parser">
+		<!-- create AST node types and weave aspect modules -->
+		<jastadd package="${package}" rewrite="true" beaver="true" novisitcheck="true" noCacheCycle="true" outdir="${basedir}">
+			<fileset dir="${Java1.4Frontend}">
+				<include name="**/*.ast"/>
+				<include name="**/*.jrag"/>
+				<include name="**/*.jadd"/>
+				<exclude name="BytecodeAttributes.jrag"/>
+				<exclude name="BytecodeDescriptor.jrag"/>
+				<exclude name="BytecodeReader.jrag"/>
+			</fileset>
+			<fileset dir="${Java1.4Backend}">
+				<include name="**/*.ast"/>
+				<include name="**/*.jrag"/>
+				<include name="**/*.jadd"/>
+			</fileset>
+			<fileset dir="${Java1.5Frontend}">
+				<include name="**/*.ast"/>
+				<include name="**/*.jrag"/>
+				<include name="**/*.jadd"/>
+				<exclude name="BytecodeAttributes.jrag"/>
+				<exclude name="BytecodeDescriptor.jrag"/>
+				<exclude name="BytecodeReader.jrag"/>
+			</fileset>
+			<fileset dir="${Java1.5Backend}">
+				<include name="**/*.ast"/>
+				<include name="**/*.jrag"/>
+				<include name="**/*.jadd"/>
+			</fileset>
+			<fileset dir="${MJFrontend}">
+				<include name="**/*.ast"/>
+				<include name="**/*.jrag"/>
+				<include name="**/*.jadd"/>
+				<exclude name="Attributes.jrag"/>
+			</fileset>
+			<fileset dir=".">
+				<include name="**/*.ast"/>
+				<include name="**/*.jrag"/>
+				<include name="**/*.jadd"/>
+			</fileset>
+		</jastadd>
+		<!-- copy library files-->
+		<copy todir="beaver" preservelastmodified="true">
+			<fileset dir="${Java1.4Frontend}/beaver">
+				<include name="**/*.java"/>
+			</fileset>
+		</copy>
+		<!-- <replaceregexp file="AST/ASTNode.java"
+		   match="private int childIndex"
+		   replace="protected int childIndex"
+		   byline="true"
+		   /> -->
+	</target>
+
+	<target name="scanner">
+		<mkdir dir="scanner"/>
+		<!-- compose the scanner -->
+		<concat destfile="scanner/JavaScanner.flex" binary="true" force="false">
+			<filelist dir="${Java1.4Frontend}/scanner">
+				<file name="preamble.flex"/>
+				<file name="macros.flex"/>
+			</filelist>
+			<filelist dir="${Java1.5Frontend}">
+				<file name="java15macros.flex"/>
+			</filelist>
+			<filelist dir="${Java1.4Frontend}/scanner">
+				<file name="rules_preamble.flex"/>
+				<file name="WhiteSpace.flex"/>
+				<file name="Comments.flex"/>
+				<file name="Keywords.flex"/>
+			</filelist>
+			<filelist dir="${Java1.5Frontend}">
+				<file name="java15keywords.flex"/>
+			</filelist>
+			<filelist dir="${MJFrontend}">
+				<file name="MJkeywords.flex"/>
+				<file name="DJkeywords.flex"/>
+			</filelist>
+			<filelist dir="${Java1.4Frontend}/scanner">
+				<file name="Literals.flex"/>
+			</filelist>
+			<filelist dir="${Java1.5Frontend}">
+				<file name="java15literals.flex"/>
+			</filelist>
+			<filelist dir="${Java1.4Frontend}/scanner">
+				<file name="Separators.flex"/>
+				<file name="Operators.flex"/>
+			</filelist>
+			<filelist dir="${Java1.5Frontend}">
+				<file name="java15operators.flex"/>
+				<!-- <file name="java15identifiers.flex"/> -->
+			</filelist>
+			<filelist dir="${MJFrontend}">
+				<file name="MJidentifiers.flex"/>
+			</filelist>
+			<filelist dir="${Java1.4Frontend}/scanner">
+				<file name="postamble.flex"/>
+			</filelist>
+
+
+		</concat>
+		<!-- generate the scanner -->
+		<jflex file="scanner/JavaScanner.flex" outdir="scanner" nobak="yes"/>
+		<copy todir="scanner" file="${Java1.4Frontend}/scanner/Unicode.java" preservelastmodified="true"/>
+	</target>
+
+	<target name="parser">
+		<mkdir dir="parser"/>
+		<!-- generate the parser phase 1, create a full .lalr specification from fragments-->
+		<concat destfile="parser/JavaParser.all" binary="true" force="false">
+			<filelist dir="${Java1.4Frontend}">
+				<file name="parser/preamble.parser"/>
+				<file name="parser/java14.parser"/>
+				<file name="parser/errorrecovery.parser"/>
+			</filelist>
+			<fileset dir="${Java1.5Frontend}">
+				<include name="*.parser"/>
+			</fileset>
+			<fileset dir="${MJFrontend}">
+				<include name="*.parser"/>
+			</fileset>
+		</concat>
+		<!-- generate the parser phase 2, translating .lalr to .beaver -->
+		<java classpath="${tools}/JastAddParser.jar:${tools}/beaver-rt.jar" classname="Main" fork="true">
+			<arg line="parser/JavaParser.all parser/JavaParser.beaver"/>
+		</java>
+		<!-- generate the parser phase 3, translating .beaver to .java -->
+		<beaver file="parser/JavaParser.beaver" terminalNames="yes" compress="yes" useSwitch="yes"/>
+	</target>
+
+	<target name="cleanJar">
+		<delete file="MJCompiler.jar"/>
+	</target>
+
+	<!-- remove generated source files and .class files -->
+	<target name="clean" depends="cleanGen,cleanJar">
+		<!-- delete all .class files recursively -->
+		<delete>
+			<fileset dir="." includes="**/*.class"/>
+		</delete>
+	</target>
+
+	<!-- remove generated source files -->
+	<target name="cleanGen">
+		<delete dir="${package}"/>
+		<delete dir="beaver"/>
+		<delete>
+			<fileset dir="scanner" includes="JavaScanner.flex"/>
+			<fileset dir="scanner" includes="JavaScanner.java"/>
+			<fileset dir="scanner" includes="Unicode.java"/>
+			<fileset dir="parser" includes="JavaParser.java"/>
+			<fileset dir="parser" includes="JavaParser.beaver"/>
+			<fileset dir="parser" includes="JavaParser.all"/>
+		</delete>
+	</target>
+
+	<!-- build binaries -->
+	<target name="jar" depends="build">
+		<jar destfile="MJCompiler.jar" basedir=".">
+			<fileset dir="." includes="**/*.class" excludes="testcases/**"/>
+			<zipfileset src="${thirdparty}/asm-all-3.1.jar" />
+			<!--    <fileset dir="${thirdparty}/asm-3.1" includes="**/*.class"/> -->
+			<manifest>
+				<attribute name="Main-Class" value="main.MJCompiler"/>
+			</manifest>
+		</jar>
+	</target>
+
+	<!-- build binary distribution with examples and testcases. -->
+	<target name="binary" depends="jar">
+		<tar destfile="morphj-binary-${version}.tar">
+			<fileset dir="../../../..">
+				<include name="morphing/README"/>
+				<include name="morphing/MorphJ/examples/**/*.java"/>
+				<include name="morphing/MorphJ/testcases/**/*.java"/>
+				<include name="morphing/MorphJ/MJBackend/src/MJCompiler.jar"/>
+			</fileset>
+			<!--
+	  <tarfileset dir="../../../..">
+	  <include name="morphing/MJ/examples/**/*.java"/>
+	  </tarfileset>
+	  <tarfileset dir="../../testcases">
+	  <include name="**/*.java"/>
+	  </tarfileset>
+      -->
+		</tar>
+		<gzip zipfile="morphj-binary-${version}.tar.gz" src="morphj-binary-${version}.tar"/>
+	</target>
+
+	<!-- build a source distribution -->
+	<target name="source" depends="build">
+		<tar destfile="morphj-src-${version}.tar">
+			<fileset dir="../../../..">
+				<include name="morphing/README"/>
+				<include name="morphing/MorphJ/examples/**/*.java"/>
+				<include name="morphing/MorphJ/testcases/**/*.java"/>
+			</fileset>
+
+			<!-- inlcude MJFrontend -->
+			<fileset dir="../../../..">
+				<include name="morphing/MorphJ/MJFrontend/src/**/*.ast"/>
+				<include name="morphing/MorphJ/MJFrontend/src/**/*.jrag"/>
+				<include name="morphing/MorphJ/MJFrontend/src/**/*.jadd"/>
+				<!-- include parser and scanner -->
+				<include name="morphing/MorphJ/MJFrontend/src/*.parser"/>
+				<include name="morphing/MorphJ/MJFrontend/src/*.flex"/>
+				<!-- include buildfile used to build the backend -->
+				<include name="morphing/MorphJ/MJFrontend/src/build.xml"/>
+			</fileset>
+
+			<!-- include MJBackend -->
+			<fileset dir="../../../..">
+				<include name="morphing/MorphJ/MJBackend/src/main/MJCompiler.java"/>
+				<include name="morphing/MorphJ/MJBackend/src/**/*.ast"/>
+				<include name="morphing/MorphJ/MJBackend/src/**/*.jrag"/>
+				<include name="morphing/MorphJ/MJBackend/src/**/*.jadd"/>
+				<!-- include buildfile used to build the backend -->
+				<include name="morphing/MorphJ/MJBackend/src/build.xml"/>
+			</fileset>
+
+			<fileset dir="../../../..">
+				<include name="morphing/MorphJ/MJBackend/thirdparty/*.jar"/>
+			</fileset>
+
+			<!-- include JastAdd Java1.4 Frontend -->
+			<fileset dir="../../../..">
+				<!-- include frontend source file -->
+				<include name="morphing/MorphJ/JastAddJ/Java1.4Frontend/JavaPrettyPrinter.java"/>
+				<include name="morphing/MorphJ/JastAddJ/Java1.4Frontend/JavaChecker.java"/>
+				<include name="morphing/MorphJ/JastAddJ/Java1.4Frontend/**/*.ast"/>
+				<include name="morphing/MorphJ/JastAddJ/Java1.4Frontend/**/*.jrag"/>
+				<include name="morphing/MorphJ/JastAddJ/Java1.4Frontend/**/*.jadd"/>
+				<!-- include parser and scanner -->
+				<include name="morphing/MorphJ/JastAddJ/Java1.4Frontend/beaver/**/*.java"/>
+				<include name="morphing/MorphJ/JastAddJ/Java1.4Frontend/scanner/*.flex"/>
+				<exclude name="morphing/MorphJ/JastAddJ/Java1.4Frontend/scanner/JavaScanner.flex"/>
+				<include name="morphing/MorphJ/JastAddJ/Java1.4Frontend/scanner/Unicode.java"/>
+				<include name="morphing/MorphJ/JastAddJ/Java1.4Frontend/parser/*.parser"/>
+				<!-- include tools and buildfile used to build the front-end -->
+				<include name="morphing/MorphJ/JastAddJ/Java1.4Frontend/tools/*.jar"/>
+				<include name="morphing/MorphJ/JastAddJ/Java1.4Frontend/build.xml"/>
+				<!-- include readme and licences -->
+				<include name="morphing/MorphJ/JastAddJ/Java1.4Frontend/README"/>
+				<include name="morphing/MorphJ/JastAddJ/Java1.4Frontend/licences/BSD"/>
+				<include name="morphing/MorphJ/JastAddJ/Java1.4Frontend/licences/CPL"/>
+				<include name="morphing/MorphJ/JastAddJ/Java1.4Frontend/licences/GPL"/>
+				<include name="morphing/MorphJ/JastAddJ/Java1.4Frontend/licences/LICENSE"/>
+			</fileset>
+
+			<!-- include Java1.4 Backend -->
+			<fileset dir="../../../..">
+				<!-- include backend source file -->
+				<include name="morphing/MorphJ/JastAddJ/Java1.4Backend/JavaCompiler.java"/>
+				<include name="morphing/MorphJ/JastAddJ/Java1.4Backend/**/*.ast"/>
+				<include name="morphing/MorphJ/JastAddJ/Java1.4Backend/**/*.jrag"/>
+				<include name="morphing/MorphJ/JastAddJ/Java1.4Backend/**/*.jadd"/>
+				<!-- include buildfile used to build the backend -->
+				<include name="morphing/MorphJ/JastAddJ/Java1.4Backend/build.xml"/>
+				<!-- include readme and licence -->
+				<include name="morphing/MorphJ/JastAddJ/Java1.4Backend/README"/>
+				<include name="morphing/MorphJ/JastAddJ/Java1.4Backend/licences/BSD"/>
+			</fileset>
+
+			<fileset dir="../../../..">
+				<!-- include backend source file -->
+				<include name="morphing/MorphJ/JastAddJ/Java1.5Backend/JavaCompiler.java"/>
+				<include name="morphing/MorphJ/JastAddJ/Java1.5Backend/**/*.ast"/>
+				<include name="morphing/MorphJ/JastAddJ/Java1.5Backend/**/*.jrag"/>
+				<include name="morphing/MorphJ/JastAddJ/Java1.5Backend/**/*.jadd"/>
+				<!-- include buildfile used to build the backend -->
+				<include name="morphing/MorphJ/JastAddJ/Java1.5Backend/build.xml"/>
+				<!-- include readme and licence -->
+				<include name="morphing/MorphJ/JastAddJ/Java1.5Backend/README"/>
+				<include name="morphing/MorphJ/JastAddJ/Java1.5Backend/licences/BSD"/>
+			</fileset>
+
+			<fileset dir="../../../..">
+				<!-- include backend source file -->
+				<include name="morphing/MorphJ/JastAddJ/Java1.5Frontend/JavaChecker.java"/>
+				<include name="morphing/MorphJ/JastAddJ/Java1.5Frontend/**/*.ast"/>
+				<include name="morphing/MorphJ/JastAddJ/Java1.5Frontend/**/*.jrag"/>
+				<include name="morphing/MorphJ/JastAddJ/Java1.5Frontend/**/*.jadd"/>
+				<!-- include parser and scanner -->
+				<include name="morphing/MorphJ/JastAddJ/Java1.5Frontend/**/*.parser"/>
+				<include name="morphing/MorphJ/JastAddJ/Java1.5Frontend/*.flex"/>
+				<!-- include buildfile used to build the backend -->
+				<include name="morphing/MorphJ/JastAddJ/Java1.5Frontend/build.xml"/>
+				<!-- include readme and licence -->
+				<include name="morphing/MorphJ/JastAddJ/Java1.5Frontend/README"/>
+				<include name="morphing/MorphJ/JastAddJ/Java1.5Frontend/licences/BSD"/>
+			</fileset>
+			<!--    <zipfileset src="${thirdparty}/asm-all-3.1.jar"/> -->
+		</tar>
+		<gzip zipfile="morphj-src-${version}.tar.gz" src="morphj-src-${version}.tar"/>
+	</target>
+
+</project>

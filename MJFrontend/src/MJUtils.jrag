@@ -1,0 +1,27 @@
+aspect MJUtils { 
+	public java.util.List ASTNode.flatMap(Map map) {
+
+		java.util.List mv = new java.util.ArrayList();
+		for (Object value : map.values()) {
+
+			// System.err.println("# Class: " + value.getClass());
+
+			if (value instanceof SimpleSet) {
+				SimpleSet simpleSet = (SimpleSet) value;
+				Iterator entry = simpleSet.iterator();
+				while (entry.hasNext()) {
+					value = entry.next();
+					if (value instanceof MethodDecl)
+						mv.add(value);
+					else
+						System.err.println("Internal compiler error: Don't know how to handle this value of type " + value.getClass() + ".");
+				}
+			} else if (value instanceof MethodDecl)
+			mv.add(value);
+			else
+				System.err.println("Internal compiler error: Don't know how to handle this value of type " + value.getClass() + ".");
+
+		}	
+		return mv;
+	}
+}

@@ -1,0 +1,8 @@
+aspect MJErrorCheck {
+    public boolean ASTNode.bypassErrorChecking = false;
+
+    refine ErrorCheck public void ASTNode.collectErrors() {
+	if ( bypassErrorChecking ) return;
+	ErrorCheck.ASTNode.collectErrors();
+    }
+}

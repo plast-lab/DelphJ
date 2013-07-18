@@ -1,0 +1,17 @@
+aspect MJSyntacticClassification {
+	eq MethodPattern.getTypeAccess().nameType() = NameType.TYPE_NAME;
+	eq MethodPattern.getParameter(int index).nameType() = NameType.TYPE_NAME;
+	eq MethodPattern.getException(int index).nameType() = NameType.TYPE_NAME;
+	
+	eq FieldPattern.getTypeAccess().nameType() = NameType.TYPE_NAME;
+
+	eq OptMethodPattern.getTypeAccess().nameType() = NameType.TYPE_NAME;
+	eq OptMethodPattern.getParameter(int index).nameType() = NameType.TYPE_NAME;
+	eq OptMethodPattern.getException(int index).nameType() = NameType.TYPE_NAME;
+	
+	eq OptFieldPattern.getTypeAccess().nameType() = NameType.TYPE_NAME;
+
+
+	eq BaseSet.getTypeAccess().nameType() = NameType.TYPE_NAME;
+
+}

@@ -1,0 +1,250 @@
+BodyDecl class_member_declaration =
+    staticfor_declaration.b {: return b; :}
+  | staticif_declaration.b  {: return b; :}
+  ;
+
+// static for body decl.
+BodyDecl staticfor_declaration = 
+    staticfor_header.i staticfor_body.l
+  {: return new StaticForDecl(i, l); :}
+  ;
+
+// static if.
+BodyDecl staticif_declaration =
+    staticif_header.i staticfor_body.l
+  {: return new StaticForDecl(i, l); :}
+  ;
+
+List staticfor_stmts =
+    block_statement.s {: return new List().add(s); :}
+  | LBRACE OR block_statements.s OR RBRACE {: return s; :}
+  ;
+
+Stmt block_statement =
+    staticfor_stmt_header.i staticfor_stmts.s 
+    {: 
+    // disambiguite between enhanced for and regular for.
+    if ( i.getNestedPatternListNoTransform().getNumChildNoTransform() == 0 ) {
+       Pattern p = i.getPatternNoTransform();
+       // check whether reflective element is missing.
+       if ( p instanceof OptFieldPattern && 
+            p.getBaseSetNoTransform().getRefElmtNoTransform() == null ) {
+	    OptFieldPattern ofp = (OptFieldPattern) p;
+
+
+	    Opt vtOpt = ofp.getTypeAccessOptNoTransform();
+	    Access vt = null;
+
+	    if ( vtOpt.getNumChildNoTransform() == 0 ) {
+	       errors.add(new Problem(null, 
+	       	       "Must specify a type for enhanced for variable declaration", 0, 0, Problem.Severity.ERROR, Problem.Kind.LEXICAL));
+	       vt = new TypeAccess("void");
+	    } else 
+	       vt = (Access) vtOpt.getChildNoTransform(0);
+
+	    VariableDeclaration v =
+	    		new VariableDeclaration(ofp.getModifiersNoTransform(), 
+	  		      vt, ofp.getID(), new Opt());
+			      
+	    // baseSet's type becomes an expression. it's already a name.
+	    BaseSet bs = p.getBaseSetNoTransform();
+	    Access ta =   bs.getTypeAccessNoTransform();
+
+	    return new EnhancedForStmt(v, ta, new Block(s));
+       } 
+    }
+    // otherwise, return StaticForStmt.
+    return new StaticForStmt(i, s, new List()); 
+    :}
+  ;
+
+List pattern_type_parameter_list_2 = 
+    LT IDENTIFIER.id GT {: return new List().add(new PatternTypeVariable(new Modifiers(), id, new List(), new List())); :}
+  | LT IDENTIFIER.id type_bound.l GT {: return new List().add(new PatternTypeVariable(new Modifiers(), id, new List(), l)); :}
+
+  | LT IDENTIFIER.id MULT GT {: return new List().add(new VectorTypeVariable(new Modifiers(), id, new List(), new List(), new List())); :}
+  | LT IDENTIFIER.id MULT type_bound.l GT {: return new List().add(new VectorTypeVariable(new Modifiers(), id, new List(), l, new List())); :}
+
+  | LT IDENTIFIER.id COMMA type_parameter_list.tl GT 
+    {: return tl.add(new PatternTypeVariable(new Modifiers(), id, new List(), new List())); :}
+  | LT IDENTIFIER.id type_bound.l COMMA type_parameter_list.tl GT 
+    {: return tl.add(new PatternTypeVariable(new Modifiers(), id, new List(), l)); :}
+  | LT IDENTIFIER.id MULT COMMA type_parameter_list.tl GT 
+    {: return tl.add(new VectorTypeVariable(new Modifiers(), id, new List(), new List(), new List())); :}
+  | LT IDENTIFIER.id MULT type_bound.l COMMA type_parameter_list.tl GT 
+    {: return tl.add(new VectorTypeVariable(new Modifiers(), id, new List(), l, new List())); :}
+  ;
+ 
+List staticfor_body =
+    class_body_declaration.c {: return new List().add(c); :}
+  | LBRACE OR class_body_declarations.l OR RBRACE {: return l; :}
+  ;
+
+IteratorDecl staticfor_stmt_header = 
+    pattern_type_parameter_list_2.l? pattern_name_parameter_list.n? 
+    FOR LPAREN pattern_in_stmt.p nested_patterns.np? RPAREN 
+    {: return new IteratorDecl(l, n, p, np, new List()); :}
+  ;
+
+Pattern pattern_in_stmt = 
+     modifiers.m? VOID IDENTIFIER.id LPAREN formal_types.l? RPAREN throws.tl? COLON baseset.b 
+     {: return new MethodPattern(b, new Modifiers(m), new PrimitiveTypeAccess("void"), id, l, tl, new Opt(), new List()); :}
+  |  modifiers.m? type.t? IDENTIFIER.id LPAREN formal_types.l? RPAREN throws.tl? COLON baseset.b 
+     {: return new OptMethodPattern(b, new Modifiers(m), t, id, l, tl, new Opt()); :}
+  | modifiers.m? type.t? IDENTIFIER.id COLON type.bt reflection_elmt.e?
+    {: 
+    if ( e.getNumChild() == 0 )
+       return new OptFieldPattern(new BaseSet(bt, null), new Modifiers(m), t, id);
+    else    
+       return new OptFieldPattern(new BaseSet(bt, (RefElmt) e.getChildNoTransform(0)), 
+       	      	  		  new Modifiers(m), t, id);
+    :}
+  ;
+
+
+IteratorDecl staticfor_header = 
+    pattern_type_parameter_list.l? pattern_name_parameter_list.n? FOR LPAREN pattern.p nested_patterns.np? RPAREN 
+    {: return new IteratorDecl(l, n, p, np, new List()); :}
+  ;  
+
+IteratorDecl staticif_header =
+    pattern_type_parameter_list.l? pattern_name_parameter_list.n? IF LPAREN nested_patterns_2.np RPAREN
+    {: return new IteratorDecl(l, n, 
+    new EmptyPrimaryPattern(new BaseSet(new AllMatchingTypeVariable(new Modifiers(), "", new List(), new List()).createBoundAccess(), new RefElmt("methods"))),
+    np, new List()); :}
+  | pattern_type_parameter_list.l? pattern_name_parameter_list.n? ERRORIF LPAREN nested_patterns_errorif.np RPAREN
+    {: return new IteratorDecl(l, n, 
+        new EmptyPrimaryPattern(new BaseSet(new AllMatchingTypeVariable(new Modifiers(), "", new List(), new List()).createBoundAccess(), new RefElmt("methods"))), np, new List()); :}
+  ;
+
+List pattern_type_parameter_list =
+    LT pattern_type_parameter_list_1.l {: return l; :}
+  ;
+List pattern_type_parameter_list_1 =
+    type_parameter_list_1.l
+    {: 
+	List l2 = new List();
+	for ( int i=0; i<l.getNumChildNoTransform(); i++) {
+	  TypeVariable tv = (TypeVariable) l.getChildNoTransform(i); 	
+	  if ( !(tv instanceof PatternTypeVariable) )
+		  l2.add(new PatternTypeVariable(tv.getModifiersNoTransform(),
+                                                 tv.getID(), 
+                                                 tv.getBodyDeclListNoTransform(), tv.getTypeBoundListNoTransform()));
+	  else l2.add(tv);
+	}				
+	return l2;	
+    :}
+  ;
+
+List pattern_name_parameter_list =
+    LBRACK pattern_name_parameters.n RBRACK {: return n; :}
+  ;
+
+TypeVariable type_parameter_1 = 
+    IDENTIFIER.v MULT GT {: return new VectorTypeVariable(new Modifiers(), v, new List(), new List(), new List()); :}
+  | IDENTIFIER.v MULT type_bound_1.l {: return new VectorTypeVariable(new Modifiers(), v, new List(), l, new List()); :}
+  ;
+
+TypeVariable type_parameter = 
+    IDENTIFIER.v MULT {: return new VectorTypeVariable(new Modifiers(), v, new List(), new List(), new List()); :}
+  | IDENTIFIER.v MULT type_bound.l {: return new VectorTypeVariable(new Modifiers(), v, new List(), l, new List()); :}
+  ;
+
+List pattern_name_parameters =
+    pattern_name_parameter.p {: return new List().add(p); :}
+  | pattern_name_parameters.l COMMA pattern_name_parameter.p {: return l.add(p); :}
+  ;
+
+PatternNameVariable pattern_name_parameter =
+    IDENTIFIER.id {: return new PatternNameVariable(id); :}
+  ;
+    
+Pattern pattern = 
+     modifiers.m? VOID IDENTIFIER.id LPAREN formal_types.l? RPAREN throws.tl? COLON baseset.b 
+     {: return new MethodPattern(b, new Modifiers(m), new PrimitiveTypeAccess("void"), id, l, tl, new Opt(), new List()); :}
+  |  modifiers.m? type.t? IDENTIFIER.id LPAREN formal_types.l? RPAREN throws.tl? COLON baseset.b 
+     {: return new OptMethodPattern(b, new Modifiers(m), t, id, l, tl, new Opt()); :}
+  | modifiers.m? type.t? IDENTIFIER.id COLON baseset.b
+     {: return new OptFieldPattern(b, new Modifiers(m), t, id); :}
+  ;
+
+List nested_patterns =
+    SEMICOLON nested_pattern.p {: return new List().add(p); :}
+  | nested_patterns.l SEMICOLON nested_pattern.p {: return l.add(p); :}
+  ;
+
+List nested_patterns_2 = 
+    nested_pattern.p {: return new List().add(p); :}
+  | nested_patterns.l SEMICOLON nested_pattern.p {: return l.add(p); :}
+  ;
+
+List nested_patterns_errorif = 
+    nested_pattern_errorif.p {: return new List().add(p); :}
+  | nested_patterns_errorif.l SEMICOLON nested_pattern_errorif.p {: return l.add(p); :}
+  ;
+
+Pattern nested_pattern =
+     NO modifiers.m? type.t? IDENTIFIER.id LPAREN formal_types.l? RPAREN throws.tl? COLON baseset.b
+     {: return new OptNestedMethodPattern(b, new Modifiers(m), t, id, l, tl, new Opt(), false, false); :}
+  |  NO modifiers.m? VOID IDENTIFIER.id LPAREN formal_types.l? RPAREN throws.tl? COLON baseset.b
+    {: return new NestedMethodPattern(b, new Modifiers(m), new PrimitiveTypeAccess("void"), id, l, tl, new Opt(), new List(), false, false); :}
+  |  NO modifiers.m? type.t? IDENTIFIER.id COLON baseset.b
+     {: return new OptNestedFieldPattern(b, new Modifiers(m), t, id, false, false); :}
+  |  SOME modifiers.m? type.t? IDENTIFIER.id LPAREN formal_types.l? RPAREN throws.tl? COLON baseset.b
+     {: return new OptNestedMethodPattern(b, new Modifiers(m), t, id, l, tl, new Opt(), true, false); :}
+  |  SOME modifiers.m? VOID IDENTIFIER.id LPAREN formal_types.l? RPAREN throws.tl? COLON baseset.b
+     {: return new NestedMethodPattern(b, new Modifiers(m), new PrimitiveTypeAccess("void"), id, l, tl, new Opt(), new List(), true, false); :}
+  |  SOME modifiers.m? type.t? IDENTIFIER.id COLON baseset.b
+     {: return new OptNestedFieldPattern(b, new Modifiers(m), t, id, true, false); :}
+  // error conditions.
+  |  ERROR NO modifiers.m? type.t? IDENTIFIER.id LPAREN formal_types.l? RPAREN throws.tl? COLON baseset.b
+     {: return new OptNestedMethodPattern(b, new Modifiers(m), t, id, l, tl, new Opt(), false, true); :}
+  |  ERROR NO modifiers.m? VOID IDENTIFIER.id LPAREN formal_types.l? RPAREN throws.tl? COLON baseset.b
+    {: return new NestedMethodPattern(b, new Modifiers(m), new PrimitiveTypeAccess("void"), id, l, tl, new Opt(), new List(), false, true); :}
+  |  ERROR NO modifiers.m? type.t? IDENTIFIER.id COLON baseset.b
+     {: return new OptNestedFieldPattern(b, new Modifiers(m), t, id, false, true); :}
+  |  ERROR SOME modifiers.m? type.t? IDENTIFIER.id LPAREN formal_types.l? RPAREN throws.tl? COLON baseset.b
+     {: return new OptNestedMethodPattern(b, new Modifiers(m), t, id, l, tl, new Opt(), true, true); :}
+  |  ERROR SOME modifiers.m? VOID IDENTIFIER.id LPAREN formal_types.l? RPAREN throws.tl? COLON baseset.b
+     {: return new NestedMethodPattern(b, new Modifiers(m), new PrimitiveTypeAccess("void"), id, l, tl, new Opt(), new List(), true, true); :}
+  |  ERROR SOME modifiers.m? type.t? IDENTIFIER.id COLON baseset.b
+     {: return new OptNestedFieldPattern(b, new Modifiers(m), t, id, true, true); :}
+  ;	
+
+Pattern nested_pattern_errorif =
+     NO modifiers.m? type.t? IDENTIFIER.id LPAREN formal_types.l? RPAREN throws.tl? COLON baseset.b
+     {: return new OptNestedMethodPattern(b, new Modifiers(m), t, id, l, tl, new Opt(), false, true); :}
+  |  NO modifiers.m? VOID IDENTIFIER.id LPAREN formal_types.l? RPAREN throws.tl? COLON baseset.b
+    {: return new NestedMethodPattern(b, new Modifiers(m), new PrimitiveTypeAccess("void"), id, l, tl, new Opt(), new List(), false, true); :}
+  |  NO modifiers.m? type.t? IDENTIFIER.id COLON baseset.b
+     {: return new OptNestedFieldPattern(b, new Modifiers(m), t, id, false, true); :}
+  |  SOME modifiers.m? type.t? IDENTIFIER.id LPAREN formal_types.l? RPAREN throws.tl? COLON baseset.b
+     {: return new OptNestedMethodPattern(b, new Modifiers(m), t, id, l, tl, new Opt(), true, true); :}
+  |  SOME modifiers.m? VOID IDENTIFIER.id LPAREN formal_types.l? RPAREN throws.tl? COLON baseset.b
+     {: return new NestedMethodPattern(b, new Modifiers(m), new PrimitiveTypeAccess("void"), id, l, tl, new Opt(), new List(), true, true); :}
+  |  SOME modifiers.m? type.t? IDENTIFIER.id COLON baseset.b
+     {: return new OptNestedFieldPattern(b, new Modifiers(m), t, id, true, true); :}
+  ;	
+
+Modifier modifier = 
+     NOT modifier.m {: return new NegativeModifier(m.getID()); :}
+// I DON"T UNDERSTAND WHY THIS DOESN"T PARSE
+//  |  NOMOD   {: return new NoModifier("NOMOD"); :}
+  ;
+
+List formal_types = 
+    type.t {: return new List().add(t); :}
+  | formal_types.l COMMA type.t {: return l.add(t); :}
+  ; 
+
+BaseSet baseset =
+    type.t reflection_elmt.e
+    {: return new BaseSet(t, e); :} 
+  ;
+
+RefElmt reflection_elmt =
+    METHODS {: return new RefElmt("methods"); :}
+  | FIELDS  {: return new RefElmt("fields"); :}
+  ;
+
+

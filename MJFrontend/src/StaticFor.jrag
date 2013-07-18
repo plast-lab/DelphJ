@@ -1,0 +1,113 @@
+package AST;
+
+aspect StaticFor {
+
+	eq StaticForDecl.isStatic() = true;
+
+	interface StaticForDeclaration {
+		IteratorDecl getIteratorDecl();
+		public ASTNode setEnd(int i);
+		public ASTNode setStart(int i);
+	}
+
+	StaticForMethodDecl implements StaticForDeclaration;
+	StaticForFieldDeclaration implements StaticForDeclaration;
+	StaticForConstructorDecl implements StaticForDeclaration;
+	StaticForStmt implements StaticForDeclaration;
+
+    // StaticForDecl may have multiple body decl's. Rewrite to a list
+    // of StaticForDeclaration
+	rewrite StaticForDecl in TypeDecl.getBodyDecl() {
+		when ( getNumBodyDecl() > 1 ) 
+		to List {
+			List declList = new List();
+			List bodyDecls = getBodyDeclListNoTransform();
+			for ( int i=0; i<getNumBodyDecl(); i++) {
+				declList.addChild((ASTNode) ((BodyDecl) bodyDecls.getChildNoTransform(i))
+					.createStaticForDeclarationFrom((IteratorDecl) getIteratorDeclNoTransform().fullCopy()));
+			}
+			return declList;
+		}
+	}
+
+    // StaticForDecl with single BodyDecl -> StaticForDeclaration.
+	rewrite StaticForDecl {
+		when ( getNumBodyDecl() == 1 )
+		to ASTNode {
+			StaticForDeclaration decl = getBodyDeclListNoTransform().getChildNoTransform(0).createStaticForDeclarationFrom(getIteratorDecl());
+			decl.setStart(start);
+			decl.setEnd(end);
+			return (ASTNode) decl;
+		}
+	}
+
+    // normalize StaticForStmt w/ VarDecl
+	rewrite VarDeclStmt in StaticForStmt.getStmt() {
+		when(getNumVariableDecl() > 1)
+		to List createVariableDeclarationList();
+	}
+
+    /*
+    rewrite StaticForStmt in Block.getStmt() { 
+	to List {
+	    List stmts = new List();
+	    for ( int i=0; i<getNumStmt(); i++) {
+		for ( int j=0; j<getNumStmt(); j++)
+		    normalizeStaticForStmts(stmts, getStmt(j));
+	    }
+	    return stmts;
+	}
+    }
+    public void StaticForStmt.normalizeStaticForStmts(List stmts, Stmt s) {
+	StaticForStatement news = new StaticForStatement((IteratorDecl) getIteratorDecl().fullCopy(), s);
+	news.setStart(start);
+	news.setEnd(end);
+	stmts.add(news);
+    }
+    public void StaticForStmt.normalizeStaticForStmts(List stmts, List s) {
+	for ( int i=0; i<s.getNumChild(); i++) 
+	    normalizeStaticForStmts(stmts,(Stmt) s.getChild(i));
+    }
+    */
+
+    public StaticForDeclaration BodyDecl.createStaticForDeclarationFrom(IteratorDecl id) {
+    	throw new Error("Cannot create StaticForDeclaration for " + getClass().getName());
+    }
+
+    public StaticForDeclaration ConstructorDecl.createStaticForDeclarationFrom(IteratorDecl id) {
+    	return new StaticForConstructorDecl(getModifiers(), 
+    		getID(), 
+    		getParameterList(), 
+    		getExceptionList(), 
+    		getConstructorInvocationOpt(), 
+    		getBlock(), 
+    		id, 
+    		new List());
+    }
+
+    public StaticForDeclaration MethodDecl.createStaticForDeclarationFrom(IteratorDecl id) {
+    	return new StaticForMethodDecl(getModifiers(), 
+    		getTypeAccess(), 
+    		getID(), 
+    		getParameterList(),
+    		getExceptionList(),
+    		getBlockOpt(), 
+    		id, 
+    		new List(), 
+    		new List());
+    }
+
+    public StaticForDeclaration FieldDeclaration.createStaticForDeclarationFrom(IteratorDecl id) {
+    	return new StaticForFieldDeclaration(getModifiers(), 
+    		getTypeAccess(), 
+    		getID(), 
+    		getInitOpt(), 
+    		id, 
+    		new List());
+    }
+
+    // TODO: MemberClassDecl, MemberInterfaceDecl, StaticInitializer
+
+    syn TypeDecl BaseSet.baseType() = getTypeAccess().type();
+    syn TypeDecl IteratorDecl.baseType() = getPattern().getBaseSet().baseType();
+}

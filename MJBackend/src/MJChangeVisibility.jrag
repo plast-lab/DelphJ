@@ -1,0 +1,241 @@
+import org.objectweb.asm.Opcodes;
+
+aspect MJChangeVisibility {
+
+    public void ConstructorDecl.makeSuperConstructorPublic(ClassDecl superclass) {
+	for ( Iterator cIt = superclass.constructors().iterator(); cIt.hasNext(); ) {
+	    // check whether this constructor matches the argument types
+	    // of this.
+	    ConstructorDecl superCons = (ConstructorDecl)cIt.next();
+	    if ( superCons.getNumParameter() != this.getNumParameter())
+		continue;
+	    boolean paramsMatch = true;
+	    for ( int j=0; j<superCons.getNumParameter(); j++) {
+		if ( !getParameter(j).type().subtype(superCons.getParameter(j).type())) {
+		    paramsMatch = false;
+		    break;
+		}
+	    }
+	    
+	    if ( paramsMatch) { 
+		// found it.
+		if ( superclass.generated || !superclass.compilationUnit().fromSource())
+		    superCons.makePublicInClassfile();
+		else
+		    superCons.makePublicInASTNode();
+		
+		// transitively change the super call in cons.
+		if ( superclass.hasSuperclass() && !superclass.superclass().isObject())
+		    superCons.makeSuperConstructorPublic((ClassDecl) superclass.superclass());
+		break;
+	    }
+	}
+    }
+    
+    public void ConstructorDecl.makePublicInClassfile() {
+	ClassNode cn  = hostType().readClassNode();
+
+	// find this constructor.
+	for ( int i=0; i<cn.methods.size(); i++) {
+	    MethodNode mn = (MethodNode) cn.methods.get(i);
+	    if ( !mn.name.equals("<init>")) continue;
+	    Signatures.MethodSignature ms = new Signatures.MethodSignature(mn.desc);		
+	    if ( ms.parameterTypes().size() != getNumParameter())
+		continue;
+	    
+	    boolean paramsMatch = true;
+	    int j=0;
+	    for ( Iterator ptIt = ms.parameterTypes().iterator(); ptIt.hasNext(); ) {
+		TypeAccess ta = (TypeAccess) ptIt.next();
+		if ( getParameter(j).type() != ta.type() ) {
+		    paramsMatch = false;
+		    break;
+		}
+		j++;
+	    }		
+	    if ( !paramsMatch ) continue;
+	    
+	    // change modifier.
+	    if ( (mn.access & Opcodes.ACC_PRIVATE) == Opcodes.ACC_PRIVATE )
+		mn.access ^= Opcodes.ACC_PRIVATE;
+	    if ( (mn.access & Opcodes.ACC_PROTECTED) == Opcodes.ACC_PROTECTED )
+		mn.access ^= Opcodes.ACC_PROTECTED;
+	    mn.access |= Opcodes.ACC_PUBLIC;
+	    break;
+	}
+
+	hostType().writeClassNode(cn);
+    }
+
+    public void ConstructorDecl.makePublicInASTNode() {
+	// change modifiers.
+	Modifiers mods = getModifiers();
+	mods.removeModifier("private");
+	mods.removeModifier("protected");
+	mods.addModifier(new Modifier("public"));
+
+	mods.flushCache();
+    }
+
+    public void FieldDeclaration.makeAccessibleInASTNode() {
+	Modifiers mods = getModifiers();
+	if ( !mods.isPublic() && !mods.isProtected()) {
+	    mods.removeModifier("private");
+	    mods.addModifier(new Modifier("protected"));
+	}
+	mods.flushCache();
+    }
+
+    public void MethodDecl.makeAccessibleInASTNode() {
+	Modifiers mods = getModifiers();
+	if ( !mods.isPublic() && !mods.isProtected()) {
+	    mods.removeModifier("private");
+	    mods.addModifier(new Modifier("protected"));
+	}
+	mods.flushCache();
+    }
+
+    public void TypeDecl.makePublicInClassfile(ClassNode cn) {
+	// change modifier.
+	if ( (cn.access & Opcodes.ACC_PRIVATE) == Opcodes.ACC_PRIVATE )
+	    cn.access ^= Opcodes.ACC_PRIVATE;
+	if ( (cn.access & Opcodes.ACC_PROTECTED) == Opcodes.ACC_PROTECTED )
+	    cn.access ^= Opcodes.ACC_PROTECTED;
+	cn.access |= Opcodes.ACC_PUBLIC;
+    }
+
+    public void TypeDecl.makePublicInASTNode() {
+	// change modifiers.
+	Modifiers mods = getModifiers();
+	mods.removeModifier("private");
+	mods.removeModifier("protected");
+	mods.addModifier(new Modifier("public"));
+
+	mods.flushCache();
+	isPublic_computed = false;
+
+	// make body declarations accessible.
+    }
+
+    public void Modifiers.removeModifier(String p) {
+	for ( int i=0; i<getNumModifier(); i++) {
+	    if ( getModifier(i).getID().equals(p)) {
+		getModifierList().removeChild(i);
+		break;
+	    }
+	}
+
+	is$Final = false;
+    }
+
+    public void TypeDecl.makeAccessibleFrom(TypeDecl t) {
+	if ( generated || !compilationUnit().fromSource())
+	    makeAccessibleFromInClassfile(t);
+	else
+	    makeAccessibleFromInASTNode(t);
+
+	// if this type is used as superclass of t, then must change
+	// the visibility of constructors, transitively.
+	if ( t instanceof ClassDecl && 
+	     ((ClassDecl) t).hasSuperclass() && 
+	     ((ClassDecl) t).superclass() == this ) {
+	    for ( Iterator cIt = t.constructors().iterator(); cIt.hasNext(); ) {
+		((ConstructorDecl) cIt.next()).makeSuperConstructorPublic((ClassDecl) this);
+	    }
+	}
+    }
+
+    public void TypeDecl.makeAccessibleFromInASTNode(TypeDecl t) {
+	makePublicInASTNode();
+	
+	// make package-protected members protected.
+	for ( int i=0; i<getNumBodyDecl(); i++) {
+	    BodyDecl b = getBodyDecl(i);
+	    if ( b.isBytecodeField()) {
+		FieldDeclaration fd = (FieldDeclaration) b;
+		if ( !fd.accessibleFrom(t))
+		    fd.makeAccessibleInASTNode();
+	    } else if ( b instanceof MethodDecl ) {
+		MethodDecl md = (MethodDecl) b;
+		if ( !md.accessibleFrom(t))
+		    md.makeAccessibleInASTNode();
+	    }
+	}
+    }
+
+    public org.objectweb.asm.tree.ClassNode TypeDecl.readClassNode() {
+	try {
+	    // change in classfile.
+	    String source = destinationPath() + File.separator + 
+		constantPoolName() + ".class";	    
+	    File thisFile = new File(source);
+
+	    FileInputStream fis = new FileInputStream(thisFile);
+
+	    // load class.
+	    ClassReader cr = new ClassReader(fis);
+	    ClassNode cn = new ClassNode();
+	    cr.accept(cn, 
+		      new org.objectweb.asm.Attribute[] { new ASMIteratorDeclAttribute(null, null) }, 
+		      0);
+	    fis.close();
+
+	    return cn;
+	} catch (IOException e) {
+	    throw new Error("Failed to read class: " + fullName());
+	}	
+    }
+
+    public void TypeDecl.writeClassNode(ClassNode cn) {
+	try {
+	    // write class.
+	    ClassWriter cw = new ClassWriter(0);
+	    cn.accept(cw);
+
+	    String source = destinationPath() + File.separator + 
+		constantPoolName() + ".class";	    	    
+
+	    FileOutputStream f = new FileOutputStream(source);
+	    DataOutputStream out = new DataOutputStream(new BufferedOutputStream(f));
+	    
+	    out.write(cw.toByteArray());
+	    out.close();
+	} catch (IOException e) {
+	    e.printStackTrace();
+	}	
+    }
+
+    public void TypeDecl.makeAccessibleFromInClassfile(TypeDecl t) {
+	ClassNode cn = readClassNode();
+	
+	makePublicInClassfile(cn);
+	
+	// find methods whose access needs to be changed.
+	for ( int i=0; i<cn.methods.size(); i++)
+	    makeMethodNodeProtected((MethodNode) cn.methods.get(i));
+	
+	// find fields that needs access changed.
+	for ( int i=0; i<cn.fields.size(); i++)
+	    makeFieldNodeProtected((FieldNode) cn.fields.get(i));
+	
+	writeClassNode(cn);
+    }
+
+    public void TypeDecl.makeMethodNodeProtected(org.objectweb.asm.tree.MethodNode mn) {
+	// change modifier.
+	if ( Opcodes.ACC_PUBLIC != (mn.access & Opcodes.ACC_PUBLIC)) {
+	    if ( (mn.access & Opcodes.ACC_PRIVATE) == Opcodes.ACC_PRIVATE )
+		mn.access ^= Opcodes.ACC_PRIVATE;
+	    mn.access |= Opcodes.ACC_PROTECTED;
+	}
+    }
+
+    public void TypeDecl.makeFieldNodeProtected(org.objectweb.asm.tree.FieldNode fn) {
+	// change modifier.
+	if ( Opcodes.ACC_PUBLIC != (fn.access & Opcodes.ACC_PUBLIC)) {
+	    if ( (fn.access & Opcodes.ACC_PRIVATE) == Opcodes.ACC_PRIVATE )
+		fn.access ^= Opcodes.ACC_PRIVATE;
+	    fn.access |= Opcodes.ACC_PROTECTED;
+	}
+    }
+}

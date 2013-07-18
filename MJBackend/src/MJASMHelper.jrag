@@ -1,0 +1,296 @@
+import org.objectweb.asm.tree.*;
+
+aspect MJASMHelper {
+
+    public class NodeCopier {
+	public Object copy(Object node) { return node; }
+    
+	public static FieldNode copyFieldNode(FieldNode fn) {
+	    return new FieldNode(fn.access,
+				 fn.name,
+				 fn.desc,
+				 fn.signature,
+				 fn.value);
+	}
+    
+	public static MethodNode copyMethodNode(MethodNode mn) {
+	    MethodNode newNode = new MethodNode();
+	    newNode.access = mn.access;
+	    newNode.name = mn.name;
+	    newNode.desc = mn.desc;
+	    newNode.signature = mn.signature;
+	    newNode.exceptions = new ArrayList(mn.exceptions);
+	    newNode.visibleAnnotations = copyListOfNodes(mn.visibleAnnotations, new AnnotationNodeCopier());
+	    newNode.invisibleAnnotations = copyListOfNodes(mn.invisibleAnnotations, new AnnotationNodeCopier());
+
+	    if ( mn.attrs != null )
+		newNode.attrs = new ArrayList(mn.attrs);
+
+	    newNode.annotationDefault = copyAnnotationNode((AnnotationNode) mn.annotationDefault);
+
+	    if ( mn.visibleParameterAnnotations != null ) {
+		newNode.visibleParameterAnnotations = new ArrayList[mn.visibleParameterAnnotations.length];
+		for ( int i=0; i<mn.visibleParameterAnnotations.length; i++) 
+		    newNode.visibleParameterAnnotations[i] = copyListOfNodes(mn.visibleParameterAnnotations[i], new AnnotationNodeCopier());
+	    }
+
+	    if ( mn.invisibleParameterAnnotations != null ) {
+		newNode.invisibleParameterAnnotations = new ArrayList[mn.invisibleParameterAnnotations.length];
+		for ( int i=0; i<mn.invisibleParameterAnnotations.length; i++) 
+		    newNode.invisibleParameterAnnotations[i] = copyListOfNodes(mn.invisibleParameterAnnotations[i], new AnnotationNodeCopier());
+	    }
+
+	    newNode.instructions = copyInsnList(mn.instructions);
+	    
+	    newNode.tryCatchBlocks = copyListOfNodes(mn.tryCatchBlocks, new TryCatchBlockNodeCopier());
+	    newNode.localVariables = copyListOfNodes(mn.localVariables, new LocalVariableNodeCopier());
+	    
+	    newNode.maxStack = mn.maxStack;
+	    newNode.maxLocals = mn.maxLocals;
+	    
+	    return newNode;
+	}
+	public static java.util.List copyListOfNodes(java.util.List nodes, NodeCopier c) {
+	    if ( nodes == null ) return null;
+	    ArrayList newList = new ArrayList();
+	    for ( int i=0; i<nodes.size(); i++) {
+		newList.add(c.copy(nodes.get(i)));
+	    }
+	    return newList;
+	}
+	
+	public static TryCatchBlockNode copyTryCatchBlockNode(TryCatchBlockNode n) {
+	    return new TryCatchBlockNode(n.start, n.end, n.handler, n.type);
+	}
+	public static InsnList copyInsnList(InsnList instructions) {
+	    InsnList newList = new InsnList();
+	    AbstractInsnNode[] insArr = instructions.toArray();
+	    for ( int i=0; i<insArr.length; i++) 
+		newList.add(copyInsnNode(insArr[i]));
+	    return newList;
+	}
+	// copy instructions from instruction beginning at begin, ending at end
+	// exclusive.
+	public static InsnList copyInsnList(InsnList instructions, int begin, int end) {
+	    InsnList newList = new InsnList();
+	    
+	    for ( int i = begin; i< end; i++)
+		newList.add(copyInsnNode(instructions.get(i)));
+
+	    return newList;
+	}
+	public static AbstractInsnNode copyInsnNode(AbstractInsnNode n) {
+	    return n.clone(SelfMap.s);
+	}
+	
+	public static void removeInsns(InsnList instructions, int begin, int end) {
+	    org.objectweb.asm.tree.AbstractInsnNode curr = instructions.get(begin);
+	    org.objectweb.asm.tree.AbstractInsnNode next = null;
+	    for ( int i=begin; i < end; i++) {
+	    	next = curr.getNext();
+		instructions.remove(curr);
+		curr = next;
+	    }
+	}
+
+	static class SelfMap extends HashMap {
+	    static SelfMap s = new SelfMap();
+	    public Object get(Object key) { 
+		if ( key instanceof LabelNode ) 
+		    return new LabelNode(((LabelNode) key).getLabel());
+		else 
+		    return key;
+	    }
+	}
+
+	public static AnnotationNode copyAnnotationNode(AnnotationNode a) {
+	    if ( a == null ) return null;
+	    AnnotationNode newNode = new AnnotationNode(a.desc);
+	    newNode.values = new ArrayList(a.values);
+	    return newNode;
+	}
+    
+	public static LocalVariableNode copyLocalVariableNode(LocalVariableNode ln) {
+	    return new LocalVariableNode(ln.name,
+					 ln.desc,
+					 ln.signature,
+					 ln.start,
+					 ln.end,
+					 ln.index);
+	}
+    }
+
+    public class AnnotationNodeCopier extends NodeCopier {
+	public Object copy(Object node) {
+	    return copyAnnotationNode((AnnotationNode) node);
+	}
+    }
+    public class TryCatchBlockNodeCopier extends NodeCopier {
+	public Object copy(Object node) {
+	    return copyTryCatchBlockNode((TryCatchBlockNode) node);
+	}
+    }
+    public class LocalVariableNodeCopier extends NodeCopier {
+	public Object copy(Object node) {
+	    return copyLocalVariableNode((LocalVariableNode) node);
+	}
+    }
+
+    public class ASMIteratorDeclAttribute extends org.objectweb.asm.Attribute {
+	IteratorDecl iterator_decl = null;
+	String iterator_sig;
+
+	public ASMIteratorDeclAttribute(final IteratorDecl id,
+					final String sig) {
+	    super("IteratorDecl");
+	    iterator_decl = id;
+	    iterator_sig = sig;
+	}
+
+	public String signature() {
+	    //	    return signature;
+	    return iterator_sig;
+	}
+
+	public boolean isUnknown() { return false; }
+
+	protected org.objectweb.asm.Attribute read(ClassReader cr, int off, int len, char[] buf, int codeOff, Label[] labels) {
+	    char[] c = new char[buf.length];
+
+	    int w = off;
+	    String itSig = cr.readUTF8(w, c);
+	    w += 2;
+	    Signatures.IteratorDeclSignature iteratorSignature = 
+		new Signatures.IteratorDeclSignature(itSig);
+	    
+	    int attrCount = cr.readUnsignedShort(w);
+	    w += 2;
+
+	    if ( attrCount > 0 ) {
+		// read constraint type variable attribute.
+		// first read off attribute name and size.
+	    	String tv_name = cr.readUTF8(w, c);
+		int tv_attr_size = cr.readInt(w+2);
+
+		w += 6;
+
+		int tvCount = cr.readUnsignedShort(w);
+		w += 2;
+
+		for ( int i=0; i<tvCount; i++) {
+		    // type constraint index.
+		    String constraint = cr.readUTF8(w, c);
+		    w += 2;
+		    
+		    Signatures s = new Signatures(constraint);
+		    TypeAccess ta = (TypeAccess) s.typeSignature();
+		    if ( s.next("C")) { // class
+			iteratorSignature.addConstraintTo(ta, "class");
+			s.eat("C");
+		    } else if ( s.next("I")) { // interface
+			iteratorSignature.addConstraintTo(ta, "interface");
+			s.eat("I");
+		    } else if ( s.next("ALL")) { // all matching
+			iteratorSignature.makeAllMatching(ta);
+			s.eat("ALL");
+		    }		
+		}
+	    }
+
+	    IteratorDecl itDecl = 
+		new IteratorDecl(iteratorSignature.patternTypeParameters(), 
+				 iteratorSignature.patternNameParameters(), 
+				 iteratorSignature.pattern(), 
+				 iteratorSignature.nestedPatterns(),
+				 new List());
+
+	    return new ASMIteratorDeclAttribute(itDecl, itSig);
+	}
+
+	// TODO: not sure if this ever matters.
+	protected ByteVector write(ClassWriter cw, byte[] code, int len,
+				   int maxStack, int maxLocals) {
+	    return new ByteVector().putShort(cw.newUTF8(iterator_decl.signature()));
+	}
+
+    }
+
+    public class ASMStaticForStmtsAttribute extends org.objectweb.asm.Attribute {
+
+	Collection<StaticForStmtsAttribute> staticForStmts;
+	
+	class StaticForStmtsAttribute {
+	    int begin_instr;
+	    int end_instr;
+	    ASMIteratorDeclAttribute iterator_attr;
+	    //	    String iterator_sig;
+
+	    StaticForStmtsAttribute(int b, int e, ASMIteratorDeclAttribute iterator_attr) { //String s) {
+		begin_instr = b;
+		end_instr = e;
+		//		iterator_sig = s;
+		this.iterator_attr = iterator_attr;
+	    }
+	}
+
+	public ASMStaticForStmtsAttribute(Collection stmtAttrs) {
+	    super("StaticForStmts");
+	    staticForStmts = stmtAttrs;
+	}
+
+	public boolean isUnknown() { return false; }    
+
+	public boolean isCodeAttribute() { return true; }
+	
+	protected org.objectweb.asm.Attribute read(ClassReader cr, int off, int len,
+				 char[] buf, int codeOff, Label[] labels) {
+	    // read number of entries.
+	    Collection attrs = new ArrayList();
+
+	    char[] ctlabel = new char[128];
+	    ASMIteratorDeclAttribute uselessInstance = new ASMIteratorDeclAttribute(null, null);
+
+	    int entries=  cr.readUnsignedShort(off);
+	    int w = off+2;
+	    for( int i=0; i<entries; i++) { 
+		// first read two numbers.
+		int begin = cr.readUnsignedShort(w);
+		int end   = cr.readUnsignedShort(w+2);
+		
+
+		// now read the iterater decl attribute.
+		//		String iterator_sig = cr.readUTF8(w+4, new char[buf.length]);
+
+		String consAttrName = cr.readUTF8(w+4, ctlabel);
+		int consAttrLen = cr.readInt(w+6);
+		
+		ASMIteratorDeclAttribute iterAttr = 
+		    (ASMIteratorDeclAttribute) uselessInstance.read(cr, w+10, consAttrLen, buf, codeOff, labels);
+
+		w += 12;
+		w += consAttrLen;
+		//		attrs.add(new StaticForStmtsAttribute(begin, end, iterator_sig));
+		attrs.add(new StaticForStmtsAttribute(begin, end, iterAttr));
+	    }
+	    return new ASMStaticForStmtsAttribute(attrs);
+	}
+
+	protected ByteVector write(ClassWriter cw, byte[] code, int len,
+				   int maxStack, int maxLocals) {
+	    ByteVector bv = new ByteVector();
+	    bv.putShort(staticForStmts.size());
+	    for ( Iterator<StaticForStmtsAttribute> i = staticForStmts.iterator();
+		  i.hasNext(); ) {
+		StaticForStmtsAttribute a = i.next();
+		/*
+		bv.putShort(a.begin_pos);
+		bv.putShort(a.end_pos);
+		bv.putUTF8(iteratorDecl);
+		return bv;
+		*/
+	    }
+	    return bv;
+	}	
+    }
+
+}

@@ -1,0 +1,29 @@
+aspect MJTransformation {
+    public void IteratorDecl.transformation() {}
+    
+    public void InterfaceDecl.transformation() {
+     // 	List<BodyDecl> list = this.getBodyDeclList();
+     // 	List<BodyDecl> newList = new List<BodyDecl>();
+     // 	for (Iterator iterator = list.iterator(); iterator.hasNext();){
+     // 		BodyDecl item = (BodyDecl) iterator.next();
+    	// 	if (!(item instanceof StaticForMethodDecl)) {
+    	// 		newList.add(item);   		
+    	// 	}
+    	// }  
+     	
+     // 	this.setBodyDeclList(newList);
+    }
+
+    public void ClassDecl.transformation() {
+     // 	List<BodyDecl> list = this.getBodyDeclList();
+     // 	List<BodyDecl> newList = new List<BodyDecl>();
+     // 	for (Iterator iterator = list.iterator(); iterator.hasNext();){
+     // 		BodyDecl item = (BodyDecl) iterator.next();
+    	// 	if (!(item instanceof StaticForMethodDecl)) {
+    	// 		newList.add(item);   		
+    	// 	}
+    	// }  
+     	
+     // 	this.setBodyDeclList(newList);
+    }
+}

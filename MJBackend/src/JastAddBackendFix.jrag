@@ -1,0 +1,13 @@
+aspect JastAddBackendFix {
+    
+    refine GenericsCodegen eq GenericMethodDecl.methodTypeSignature() {
+	StringBuffer buf = new StringBuffer();
+	buf.append("<");
+	for(int i = 0; i < getNumTypeParameter(); i++)
+	    buf.append(getTypeParameter(i).formalTypeParameter());
+	buf.append(">");
+	buf.append(super.methodTypeSignature());
+	return buf.toString();
+    }
+
+}

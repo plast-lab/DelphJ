@@ -1,0 +1,252 @@
+aspect MJTypeAnalysis {
+    /*
+    inh BodyDecl Pattern.hostBodyDecl();
+    inh BodyDecl IteratorDecl.hostBodyDecl();
+    eq IteratorDecl.getPattern().hostBodyDecl() = hostBodyDecl();
+    eq IteratorDecl.getNestedPattern(int i).hostBodyDecl() = hostBodyDecl();
+    eq StaticForMethodDecl.getIteratorDecl().hostBodyDecl() = this;
+    eq StaticForConstructorDecl.getIteratorDecl().hostBodyDecl() = this;
+    eq StaticForFieldDeclaration.getIteratorDecl().hostBodyDecl() = this;
+    eq StaticForStmt.getIteratorDecl().hostBodyDecl() = hostBodyDecl();
+    eq StaticForDecl.getIteratorDecl().hostBodyDecl() = this;
+    */
+
+    inh BodyDecl Pattern.enclosingBodyDecl();
+    inh BodyDecl IteratorDecl.enclosingBodyDecl();
+    eq IteratorDecl.getPattern().enclosingBodyDecl() = enclosingBodyDecl();
+    eq IteratorDecl.getNestedPattern(int i).enclosingBodyDecl() = enclosingBodyDecl();
+    eq StaticForMethodDecl.getIteratorDecl().enclosingBodyDecl() = this;
+    eq StaticForConstructorDecl.getIteratorDecl().enclosingBodyDecl() = this;
+    eq StaticForFieldDeclaration.getIteratorDecl().enclosingBodyDecl() = this;
+    eq StaticForStmt.getIteratorDecl().enclosingBodyDecl() = enclosingBodyDecl();
+    eq StaticForDecl.getIteratorDecl().enclosingBodyDecl() = this;
+
+    eq MethodPattern.getPatternMethodDecl().hostType() = getBaseSet().type();
+    eq FieldPattern.getPatternFieldDeclaration().hostType() = getBaseSet().type();
+
+
+    refine TypeAnalysis public TypeDecl ClassDecl.superclass() {
+    	if(isObject())
+    		return null;
+    	if(hasSuperClassAccess() && !isCircular() &&
+    		getSuperClassAccess().type().isClassDecl())
+    		return getSuperClassAccess().type();
+    	return typeObject();
+    }
+
+    refine TypeAnalysis public Iterator ClassDecl.interfacesIterator() {
+    	return new Iterator() {
+    		public boolean hasNext() {
+    			computeNextCurrent();
+    			return current != null;
+    		}
+    		public Object next() {
+    			return current;
+    		}
+    		public void remove() {
+    			throw new UnsupportedOperationException();
+    		}
+    		private int index = 0;
+    		private TypeDecl current = null;
+    		private void computeNextCurrent() {
+    			current = null;
+    			if(isObject() || isCircular())
+    				return;
+    			while(index < getNumImplements()) {
+    				TypeDecl typeDecl = getImplements(index++).type();
+    				if(!typeDecl.isCircular() && typeDecl.isInterfaceDecl()) {
+    					current = typeDecl;
+    					return;
+    				}
+    			}
+    		}
+    	};
+    }
+    
+    refine TypeAnalysis public Iterator InterfaceDecl.superinterfacesIterator() {
+    	return new Iterator() {
+    		public boolean hasNext() {
+    			computeNextCurrent();
+    			return current != null;
+    		}
+    		public Object next() {
+    			return current;
+    		}
+    		public void remove() {
+    			throw new UnsupportedOperationException();
+    		}
+    		private int index = 0;
+    		private TypeDecl current = null;
+    		private void computeNextCurrent() {
+    			current = null;
+    			if(isCircular()) return;
+    			while(index < getNumSuperInterfaceId()) {
+    				TypeDecl typeDecl = getSuperInterfaceId(index++).type();
+    				if(!typeDecl.isCircular() && typeDecl.isInterfaceDecl()) {
+    					current = typeDecl;
+    					return;
+    				}
+    			}
+    		}
+    	};
+    }
+}
+
+aspect MJCircularity {
+    // Circurlarity in MJ: 
+    // - check supertype's bounds for circularity
+    // - check reflective base type.
+	refine TypeAnalysis eq ClassDecl.isCircular () {
+		if ( TypeAnalysis.ClassDecl.isCircular()) 
+			return true;
+
+		//Check reflective declarations.
+		for ( int i=0; i<getNumBodyDecl(); i++) {
+			BodyDecl bd = getBodyDecl(i);
+			if ( bd.isReflectiveDecl()) {
+				StaticForDeclaration sfd = (StaticForDeclaration) bd;
+				if ( (bd instanceof MethodDecl && sfd.getIteratorDecl().iterateMethods()) || (bd instanceof FieldDeclaration &&	sfd.getIteratorDecl().iterateFields()))
+					if ( sfd.getIteratorDecl().baseType().isCircular()) {
+						bd.circularlyDefined = true;
+						return true;			
+					}    
+				}
+			}
+			return false;
+		}
+
+		public boolean BodyDecl.circularlyDefined = false;
+
+		refine TypeAnalysis eq InterfaceDecl.isCircular () {
+			if ( TypeAnalysis.InterfaceDecl.isCircular()) return true;
+
+			// check reflective declarations.
+			for ( int i=0; i<getNumBodyDecl(); i++) {
+				BodyDecl bd = getBodyDecl(i);
+				if ( bd.isReflectiveDecl()) {
+					if ( ((StaticForDeclaration) bd).getIteratorDecl().baseType().isCircular()) return true;
+				}
+			}
+			return false;
+		}
+		eq ParTypeDecl.isCircular() = genericDecl().isCircular();
+
+		eq TypeVariable.isCircular() {
+			// check whether bounds are circular.
+			for ( int i=0; i<getNumTypeBound(); i++) {
+				if ( getTypeBound(i).type().isCircular()) return true;
+			}
+			return false;
+		}
+
+		syn lazy boolean TypeDecl.isFbounded()  = false;
+		eq GenericTypeDecl.isFbounded() {
+			for ( int i=0; i<getNumTypeParameter(); i++) {
+				TypeVariable v = getTypeParameter(i);
+				for ( int j=0; j<v.getNumTypeBound(); j++ )
+					if ( v.getTypeBound(j).typeRaw() == this )
+						return true;
+				}
+				return false;
+			}
+
+			syn lazy TypeDecl Access.typeRaw() = type();
+			eq TypeAccess.typeRaw() {
+				SimpleSet decls = decls();
+				if(decls.size() == 1) {
+					return (TypeDecl)decls.iterator().next();
+				}
+				return unknownType();
+			}
+
+			refine Generics eq TypeAccess.decl() {
+				TypeDecl decl = typeRaw();
+
+				if(decl instanceof GenericTypeDecl && isRaw()) {
+					ArrayList args = new ArrayList();
+					if ( decl.isFbounded()) {
+						for ( int i=0; i<((GenericTypeDecl) decl).getNumTypeParameter(); i++) {
+							TypeVariable tv = ((GenericTypeDecl) decl).getTypeParameter(i);
+							if ( tv.getTypeBound(0).typeRaw() == decl )
+								args.add(decl);
+							else 
+								args.add(tv.getTypeBound(0).type());
+						}
+					}
+					return ((GenericTypeDecl)decl).lookupParTypeDecl(args);
+				}
+				return decl;
+			}
+
+
+    // Each type has a chain of dependent types.
+    /*
+    syn lazy boolean TypeDecl.circularlyDefined(Set currentChain) = currentChain.contains(this);
+
+    eq ClassDecl.circularlyDefined(Set currentChain) {
+	if ( currentChain.contains(this)) return true;
+
+	currentChain.add(this);
+
+	if ( hasSuperclass())
+	    if ( superclass().circularlyDefined(currentChain)) return true;
+	for ( Iterator ifIt = interfacesIterator(); ifIt.hasNext(); ) {
+	    if ( ((TypeDecl) ifIt.next()).circularlyDefined(currentChain))
+		return true;
+	}
+
+	// add all the types this uses for reflective declaration.
+	Collection rm = reflectiveMethods();
+	for ( Iterator rmIt = rm.iterator(); rmIt.hasNext(); ) {
+	    TypeDecl baseType = ((MethodDecl) rmIt.next()).reflectiveBaseType();
+	    if ( baseType.circularlyDefined(currentChain))
+		return true;
+	}
+
+	return false;
+    }
+
+    eq ParTypeDecl.circularlyDefined(Set currentChain) = genericDecl().circularlyDefined(currentChain);
+	
+    refine TypeAnalysis eq ClassDecl.isCircular() {
+	if (TypeAnalysis.ClassDecl.isCircular()) return true;
+	return circularlyDefined(new HashSet());
+    }
+    refine TypeAnalysis eq InterfaceDecl.isCircular() {
+	if (TypeAnalysis.InterfaceDecl.isCircular()) return true;
+	return circularlyDefined(new HashSet());
+    }    
+    */
+
+    // NonVoidType.
+    eq NonVoidType.isSupertypeOfClassDecl(ClassDecl type) = true;
+    eq NonVoidType.isSupertypeOfInterfaceDecl(InterfaceDecl type) = true;
+    eq NonVoidType.isSupertypeOfArrayDecl(ArrayDecl type) = true;
+    eq NonVoidType.isSupertypeOfPrimitiveType(PrimitiveType type) = true;
+    eq NonVoidType.isSupertypeOfNullType(NullType type) = true;
+    eq NonVoidType.isSupertypeOfVoidType(VoidType type) = false;
+
+    eq NonVoidType.isClassDecl() = true;
+    eq NonVoidType.isInterfaceDecl() = true;
+    eq NonVoidType.erasure() = this;
+    eq NonVoidType.accessibleFrom(TypeDecl type) = true;
+
+    syn lazy boolean TypeDecl.isNonVoidType() = false;
+    eq NonVoidType.isNonVoidType() = true;
+
+
+    eq PatternTypeVariable.erasure() {
+    	if ( getTypeBound(0).type().isNonVoidType()) 
+    		return this;
+    	return super.erasure();
+    }
+
+    refine GenericsParTypeDecl eq MethodDecl.visibleTypeParameters() = !isStatic() || hostType().needsExpansion();
+    refine GenericsParTypeDecl eq FieldDeclaration.visibleTypeParameters() = !isStatic() || hostType().needsExpansion();
+    refine GenericsParTypeDecl eq StaticInitializer.visibleTypeParameters() = hostType().needsExpansion();
+    refine GenericsParTypeDecl eq MemberTypeDecl.visibleTypeParameters() = !isStatic() || hostType().needsExpansion();
+
+    public boolean NonVoidType.isNestedType() { return false; }
+    public void NonVoidType.java2Transformation() {}
+
+}

@@ -1,0 +1,393 @@
+import org.objectweb.asm.*;
+import org.objectweb.asm.tree.*;
+import java.io.*;
+
+aspect MJGenerateClassfile {
+    /*
+    public void StaticForMethodDecl.generateMethod(DataOutputStream out, ConstantPool cp) throws IOException {
+	super.generateMethod(out, cp);
+    }
+    */
+
+    refine GenerateClassfile public void CompilationUnit.generateClassfile() {
+	if(fromSource()) {
+	    for(int i = 0; i < getNumTypeDecl(); i++) {
+		getTypeDecl(i).generateClassfile();
+		// move this to later, after expansion.
+		// getTypeDecl(i).clear();
+	    }
+	}
+    }
+
+    public class ASMConstrainedTypeVariableAttribute extends org.objectweb.asm.Attribute {
+	Collection typesConstraints = new ArrayList();
+
+	public ASMConstrainedTypeVariableAttribute(Collection c) {
+	    super("TypeVariableConstraints");
+	    typesConstraints = c;
+	}
+
+	protected org.objectweb.asm.Attribute read(ClassReader cr, int off, int len,
+						   char[] buf, int codeOff, Label[] labels) {
+	    Collection typesConstraints = new ArrayList();
+	
+	    // first read how many there are.
+	    int types = cr.readUnsignedShort(off);
+
+	    int w = off+2;
+	    for ( int i=0; i<types; i++) {
+		// each type attribute is just a utf8
+		int utf8index = cr.readUnsignedShort(w);
+		String typeSig = cr.readUTF8(utf8index, new char[buf.length]);
+		typesConstraints.add(typeSig);
+
+		w += 2;
+	    }
+
+	    return new ASMConstrainedTypeVariableAttribute(typesConstraints);
+	}
+    }
+
+    protected String ParClassDecl.sourceFile() {
+	TypeDecl gt = genericDecl();
+
+	String outDir = null;
+	String destPath = gt.destinationPath();
+	
+	String filePath = expandedConstantPoolName().lastIndexOf(File.separator) > -1 ?	    
+	    expandedConstantPoolName().substring(0, expandedConstantPoolName().lastIndexOf(File.separator))
+	    : "";
+	
+	if ( gt.compilationUnit().fromSource()) 
+	    outDir = destPath + File.separator + filePath;
+	else
+	    outDir = destPath.substring(0, destPath.lastIndexOf(File.separator) + 1);
+
+	String outFileName = null;
+
+	// check whether outDir is writeable.
+	File outDirFile = new File(outDir);
+	if ( !outDirFile.canWrite()) {
+	    // TODO: write into output dir + expandedConstantPoolName
+	    if(Program.hasValueForOption("-d")) 
+		outFileName = Program.getValueForOption("-d");
+	    else outFileName = ".";
+	    outFileName += expandedConstantPoolName();
+	} else 
+	    outFileName = outDirFile + File.separator + expandedName() + ".class";
+	return outFileName;
+    }
+
+    public boolean TypeDecl.generated = false;
+    refine GenerateClassfile public void ClassDecl.generateClassfile() {
+	GenerateClassfile.ClassDecl.generateClassfile();
+	generated = true;
+    }
+    refine GenerateClassfile public void InterfaceDecl.generateClassfile() {
+	GenerateClassfile.InterfaceDecl.generateClassfile();
+	generated = true;
+    }
+
+    public void ParClassDecl.generateClassfile() {
+	if ( generated ) return;
+	try {
+	    TypeDecl gt = genericDecl();
+	    
+	    // TODO: should check whether gt already exists and has the proper
+	    // timestamp: i.e. its timestamp is newer than the timestamp of its
+	    // generic decl as well as all type arguments.
+
+	    // Check that all type arguments can be accessed from this
+	    // package. If not, 
+	    // - increase visibility of type argument.
+	    for ( int i=0; i<getNumArgument(); i++) {
+		TypeDecl at = getArgument(i).type();
+		if ( !at.accessibleFrom(this)) {
+		    at.makeAccessibleFrom(this);
+		}
+	    }
+
+	    // TODO: fix JastAddJ PathPart.getCompilationUnit()
+	    // inner class overrides the pathname of the outerclass.
+	    /*
+	      String gtSource = gt.compilationUnit().fromSource() ? 
+	      gt.destinationPath() + File.separator + gt.constantPoolName() + ".class"
+	      : gt.destinationPath();
+	    */
+
+	    String gtSource = null;
+	    if ( gt.compilationUnit().fromSource() ) 
+		gtSource = gt.destinationPath() + File.separator + gt.constantPoolName() + ".class";
+	    else {
+		String relativeName = gt.fullName().replace(".", File.separator);
+		String destPath = gt.destinationPath();
+		int i = destPath.indexOf(relativeName);
+		gtSource = destPath.substring(0, i) + relativeName + ".class";
+	    }
+
+	    String outFileName = sourceFile();
+
+	    if(Program.verbose()) 
+		System.out.println("Writing class file to " + outFileName);
+
+	    File gtFile = new File(gtSource);
+	    FileInputStream fis = new FileInputStream(gtFile);
+
+	    // load class.
+	    ClassReader cr = new ClassReader(fis);
+	    ClassNode cn = new ClassNode();
+
+	    cr.accept(cn, 
+		      new org.objectweb.asm.Attribute[] { 
+			  new ASMIteratorDeclAttribute(null, null),
+			  new ASMStaticForStmtsAttribute(null) },
+		      0);
+	    
+	    // transform ClassNode cn.
+	    expand(cn);
+
+	    // write class.
+	    File outFile = new File(outFileName);
+	    ClassWriter cw = new ClassWriter(0);
+	    cn.accept(cw);
+	    
+	    FileOutputStream f = new FileOutputStream(outFileName);
+	    DataOutputStream out = new DataOutputStream(new BufferedOutputStream(f));
+	    
+	    out.write(cw.toByteArray());
+	    
+	    // bytecode verifier.
+	    if ( Program.verbose()) {
+		try {
+		    ClassReader verifyReader = new ClassReader(cw.toByteArray());
+		    org.objectweb.asm.util.CheckClassAdapter.verify(verifyReader, false, new PrintWriter(System.err));
+		} catch ( Throwable e) {
+		    System.err.println("Exception when verifying bytecode: ");// + e.getMessage());
+		}
+	    }
+
+	    out.close();
+	    fis.close();
+
+	    generated = true;
+	} catch (IOException e) {
+	    e.printStackTrace();
+	}
+    }
+
+    refine StaticImportsCodegen protected TypeDecl VarAccess.fieldQualifierType() {
+	// from CreateBCode.
+	TypeDecl typeDecl = hostType();
+	if(hasPrevExpr())
+	    typeDecl = prevExpr().type();
+
+	Identifier id = enclosingRefIterator() != null ?
+	    new Identifier(name(), enclosingRefIterator()) 
+	    : new Identifier(name(), IteratorDecl.TrueIteratorDecl);
+	while(typeDecl != null && !typeDecl.hasField(id))
+	    typeDecl = typeDecl.enclosingType();
+	/*
+	if ( isNameVariable(name()) || containsNameVariable(name())) {
+	    Identifier id = new Identifier(name(), enclosingRefIterator());
+	    while(typeDecl != null && !typeDecl.hasField(id))
+		typeDecl = typeDecl.enclosingType();
+	} else {
+	    while(typeDecl != null && !typeDecl.hasField(name()))
+		typeDecl = typeDecl.enclosingType();
+	}
+	*/
+
+	// from GenericsCodegen
+	if ( typeDecl == null )				
+	    return decl().hostType();
+
+	// added to make sure we don't erase away type variable information
+	// when field qualifier is a type variable
+	if ( typeDecl.shouldErase())
+	    return typeDecl.erasure();
+	return typeDecl;
+    }
+
+    refine StaticImportsCodegen protected TypeDecl MethodAccess.methodQualifierType() {
+	TypeDecl typeDecl = null;
+
+	// from GenericsCodegen
+	if(decl().isStatic())
+	    typeDecl = decl().hostType();
+	else {
+	    // from CreateBCode MethodAccess.methodQualifierType()
+	    if(hasPrevExpr())
+		typeDecl = prevExpr().type();
+	    else {
+		typeDecl = hostType();
+		while(typeDecl != null && !typeDecl.hasMethod(name()))
+		    typeDecl = typeDecl.enclosingType();
+	    }
+	}
+
+	// from StaticImportsCodegen
+	if ( typeDecl == null ) 
+	    typeDecl = decl().hostType();
+
+	/* TODO: i think this causes problems.
+	TypeDecl hostType = hostType();
+	while ( hostType.isInnerType()) 
+	    hostType = hostType.hostType();
+	*/
+
+	if ( typeDecl.shouldErase())
+	    return typeDecl.erasure();
+
+	return typeDecl;
+    }
+
+    refine GenericsCodegen public void ConstructorDeclSubstituted.emitInvokeConstructor(CodeGeneration gen) {
+	if ( hostType().shouldErase())
+	    erasedConstructor().emitInvokeConstructor(gen);
+	else {
+	    int size = -1;
+	    for(int i = 0; i < getNumParameter(); i++)
+		size -= getParameter(i).type().variableSize();
+	    if(hostType().needsEnclosing())
+		size--;
+	    if(hostType().needsSuperEnclosing()) {
+		size--;
+	    }
+	    for(Iterator iter = hostType().enclosingVariables().iterator(); iter.hasNext(); ) {
+		Variable v = (Variable)iter.next();
+		size -= v.type().variableSize();
+	    }
+	    String classname = hostType().expandedConstantPoolName();
+	    String      desc = descName();
+	    String      name = "<init>";
+	    int index = gen.constantPool().addMethodref(classname, name, desc);
+	    gen.emit(Bytecode.INVOKESPECIAL, size).add2(index);
+	}
+    }
+
+    
+}
+
+aspect FixJastadd {
+    // add signature attribute to constructors.
+    refine AnnotationsCodegen eq ConstructorDecl.attributes() {
+	//	Collection c = AnnotationsCodegen.ConstructorDecl.attributes();
+	// from AnnotationsCodegen
+	// change CodeAttribute -> MJCodeAttribute
+	ArrayList l = new ArrayList();
+	l.add(new MJCodeAttribute(bytecodes(hostType().constantPool()), null));
+	l.add(new ExceptionsAttribute(bytecodes(hostType().constantPool()), this));
+	if(getModifiers().isSynthetic())
+	    l.add(new SyntheticAttribute(hostType().constantPool()));
+	
+	if (needsSignatureAttribute())
+	    l.add(new SignatureAttribute(hostType().constantPool(),
+					 constructorTypeSignature()));
+	return l;
+    }
+    
+    refine GenericsCodegen eq MethodDecl.attributes() {
+	// from Attributes.jrag
+	ArrayList l = new ArrayList();
+	l.add(new ExceptionsAttribute(bytecodes(hostType().constantPool()), this));
+	if(isAbstract() || isNative()) return l;
+	l.add(new MJCodeAttribute(bytecodes(hostType().constantPool()), this));
+	if(getModifiers().isSynthetic())
+	    l.add(new SyntheticAttribute(hostType().constantPool()));
+
+	// from AnnotationsCodegen
+	getModifiers().addRuntimeVisibleAnnotationsAttribute(l);
+	getModifiers().addRuntimeInvisibleAnnotationsAttribute(l);
+	addRuntimeVisibleParameterAnnotationsAttribute(l);
+	addRuntimeInvisibleParameterAnnotationsAttribute(l);
+
+	// from GenericsCodegen.
+	if(needsSignatureAttribute())
+	    l.add(new SignatureAttribute(hostType().constantPool(), methodTypeSignature()));
+	
+	return l;
+    }
+
+    refine Attributes eq TypeDecl.clinit_attributes() {
+    ArrayList l = new ArrayList();
+    l.add(new MJCodeAttribute(bytecodes(constantPool()), null));
+    return l;
+    }
+
+    syn String ConstructorDecl.constructorTypeSignature() {
+	StringBuffer buf = new StringBuffer();
+	buf.append("(");
+	for ( int i=0; i<getNumParameter(); i++) 
+	    buf.append(getParameter(i).type().classTypeSignature());
+	buf.append(")");
+	buf.append(lookupType(PRIMITIVE_PACKAGE_NAME, "void").classTypeSignature());
+	for(int i = 0; i < getNumException(); i++)
+	    buf.append("^" + getException(i).type().classTypeSignature());
+	return buf.toString();
+    }
+
+
+    refine GenericsCodegen eq TypeVariable.typeDescriptor() {
+	if ( this.hostType().needsExpansion())
+	    return this.classTypeSignature();
+    	return erasure().typeDescriptor();  
+    }
+    eq PatternTypeVariable.typeDescriptor() = classTypeSignature();
+    eq PatternTypeVariable.constantPoolName() = classTypeSignature();
+    eq VectorTypeVariable.classTypeSignature() = "T" + name() + "*;";
+
+    eq VectorTypeVariable.formalTypeParameter() {
+	StringBuffer buf = new StringBuffer();
+	// Identifier
+	buf.append(name() + "*");
+	buf.append(":");
+	if(getNumTypeBound() > 0) {
+	    // ClassBound InterfaceBound*
+	    if(getTypeBound(0).type().isClassDecl())
+		buf.append(getTypeBound(0).type().fieldTypeSignature());
+	    else
+		buf.append(":" + getTypeBound(0).type().fieldTypeSignature());
+	    for(int i = 1; i < getNumTypeBound(); i++)
+		buf.append(":" + getTypeBound(i).type().fieldTypeSignature());
+	}
+	return buf.toString();
+    }
+    eq AllMatchingTypeVariable.formalTypeParameter() {
+	StringBuffer buf = new StringBuffer();
+	buf.append(name() + "%");
+	buf.append(";");
+	return buf.toString();
+    }
+
+    // fixes to casts that assume isClassDecl means the type can be cast
+    // to ClassDecl
+    refine InnerClasses eq TypeDecl.enclosingVariables() {
+	HashSet set = new HashSet();
+	for(TypeDecl e = this; e != null; e = e.enclosingType()) {
+	    if(e.isLocalClass() || e.isAnonymous()) {
+		collectEnclosingVariables(set, e.enclosingType());
+	    }
+	}
+	if(isClassDecl() && !isTypeVariable()) {
+	    ClassDecl classDecl = (ClassDecl)this;
+	    if(classDecl.isNestedType() && classDecl.hasSuperclass())
+		set.addAll(classDecl.superclass().enclosingVariables());
+	}
+	return set;
+    }
+
+    refine GenericsCodegen eq MethodDeclSubstituted.erasedMethod() = shouldErase() ? GenericsCodegen.MethodDeclSubstituted.erasedMethod() : this;
+    refine GenericsCodegen eq ParMethodDecl.erasedMethod() = shouldErase() ? GenericsCodegen.ParMethodDecl.erasedMethod() : this;
+
+    refine GenericsCodegen eq FieldDeclarationSubstituted.erasedField() = shouldErase() ? GenericsCodegen.FieldDeclarationSubstituted.erasedField() : this;
+
+
+    /*
+    refine AutoBoxing eq ReferenceType.unboxed() {
+	if ( isEnumDecl()) return typeInt();
+	return AutoBoxing.ReferenceType.unboxed();
+    }
+
+    eq EnumDecl.boxed() = this;
+    */
+}

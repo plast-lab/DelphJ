@@ -1,0 +1,72 @@
+PatternTypeVariable : TypeVariable;
+VectorTypeVariable : PatternTypeVariable ::= MatchedVectorTypeVariable*;
+MatchedVectorTypeVariable : PatternTypeVariable;
+
+AllMatchingTypeVariable : PatternTypeVariable;
+NonVoidType : TypeDecl;
+
+PatternNameVariable ::= <ID:String>;
+
+// StaticFor and StaticIf class member declarations before normalization.
+StaticForDecl : MemberDecl ::= IteratorDecl BodyDecl*;
+
+// Normalized, Parameterized, and Expanded StaticFor constructor declarations
+StaticForConstructorDecl : ConstructorDecl ::= IteratorDecl StaticForConstructorDeclSubstituted*;
+StaticForConstructorDeclSubstituted : StaticForConstructorDecl;
+
+StaticForMethodDecl : MethodDecl ::= IteratorDecl DecompiledAccess:Access* StaticForMethodDeclSubstituted*;
+StaticForMethodDeclSubstituted : StaticForMethodDecl; 
+GroundedStaticForMethodDecl : StaticForMethodDeclSubstituted;
+EveryMethodDecl : StaticForMethodDecl;
+
+/*
+ParStaticForMethodDecl : StaticForMethodDecl ::= ExpandedMethodDecl*; 
+ExpandedMethodDecl : MethodDecl;
+*/
+
+StaticForFieldDeclaration : FieldDeclaration ::=  IteratorDecl StaticForFieldDeclarationSubstituted*;
+StaticForFieldDeclarationSubstituted : StaticForFieldDeclaration; // ::= ExpandedFieldDeclaration*;
+
+StaticForStmt : Stmt ::= IteratorDecl Stmt* SubstitutedStaticForStmt*;
+SubstitutedStaticForStmt : StaticForStmt;
+//ExpandedStaticForStmt : Stmt;
+
+IteratorDecl ::= PatternTypeParameter:TypeVariable* PatternNameParameter:PatternNameVariable* Pattern NestedPattern:Pattern* ParIteratorDecl*;
+ParIteratorDecl : IteratorDecl;
+TrueIteratorDecl : IteratorDecl;
+
+Pattern ::= BaseSet;
+
+OptMethodPattern : Pattern ::= Modifiers [TypeAccess:Access] <ID:String> Parameter:Access* Exception:Access*  [PatternMethodDecl];
+OptNestedMethodPattern : OptMethodPattern ::= <IsPositive:boolean> <IsErrorCondition:boolean>;
+
+OptFieldPattern : Pattern ::= Modifiers [TypeAccess:Access] <ID:String>;
+OptNestedFieldPattern : OptFieldPattern ::= <IsPositive:boolean> <IsErrorCondition:boolean>;
+
+MethodPattern : Pattern ::= Modifiers TypeAccess:Access <ID:String> Parameter:Access* Exception:Access*  [PatternMethodDecl] SubMethodPattern:MethodPattern*;
+
+StaticMethodPattern : MethodPattern;
+StaticFieldPattern : FieldPattern;
+
+FieldPattern : Pattern ::= Modifiers TypeAccess:Access <ID:String> [PatternFieldDeclaration] SubFieldPattern:FieldPattern*;
+
+NestedMethodPattern : MethodPattern ::= <IsPositive:boolean> <IsErrorCondition:boolean>;
+NestedFieldPattern : FieldPattern ::= <IsPositive:boolean> <IsErrorCondition:boolean>;
+
+TrueNestedPattern : Pattern;
+
+// Pattern used for IteratorDecl with empty primary, just nested patterns.
+// This pattern has the following property:
+// - subsumes every pattern and subsumed by nothing but itself.
+// - has the range of exactly one. binds no pattern variables.
+EmptyPrimaryPattern : Pattern;
+
+BaseSet ::= TypeAccess:Access RefElmt;
+
+RefElmt ::= <ElmtName:String>;
+
+PatternMethodDecl : MethodDecl;
+PatternFieldDeclaration : FieldDeclaration;
+
+NegativeModifier : Modifier;
+NoModifier : Modifier;

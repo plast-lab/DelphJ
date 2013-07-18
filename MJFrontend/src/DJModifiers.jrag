@@ -1,0 +1,34 @@
+aspect DJModifiers {
+	
+	// checks if modifier collection contains subobject
+	syn lazy boolean Modifiers.isSubobject() = numModifier("subobject") != 0;
+
+	// adds to interface the querying method
+	syn boolean Variable.isSubobject();
+
+	// checks if a field declaration is subobject; if yes, it keeps the value and removes the keyword
+	private boolean FieldDeclaration.isSubobject = false;
+	eq FieldDeclaration.isSubobject() {
+		if (getModifiers().isSubobject()) {
+			isSubobject = true;
+			getModifiers().removeModifier(Program.SubobjectModifier);
+		} 
+		return isSubobject;
+	}
+
+	eq VariableDeclaration.isSubobject () = false;
+	eq ParameterDeclaration.isSubobject () = false;
+
+	syn lazy boolean VariableDeclaration.assignsSubobject() = hasInit() ? getInit().isSubobjectDeclaration():false;
+	syn lazy boolean VarAccess.isAssignedToSubobject() {
+		if(getParent() instanceof AssignSimpleExpr){
+			AssignSimpleExpr assignment = (AssignSimpleExpr) getParent(); 
+			return assignment.getSource().isSubobjectDeclaration();
+		}
+		return false;
+	}
+	syn lazy boolean Expr.isSubobjectDeclaration() = false;
+	eq Access.isSubobjectDeclaration() = false;
+	eq VarAccess.isSubobjectDeclaration() = decl().isSubobject();
+	eq AbstractDot.isSubobjectDeclaration() = rightSide().isSubobjectDeclaration();
+} 

@@ -1,0 +1,99 @@
+aspect MJMixin {
+	syn lazy boolean TypeDecl.isConstrainedTypeVariable() = false;
+	eq ConstrainedTypeVariable.isConstrainedTypeVariable() = true;
+
+	syn lazy boolean TypeVariable.mustbeClass() = false;
+	syn lazy boolean TypeVariable.mustbeInterface() = false;
+	eq ConstrainedTypeVariable.mustbeClass() = getConstraint().equals("class");
+	eq ConstrainedTypeVariable.mustbeInterface() = getConstraint().equals("interface");
+
+    // implementedInterfaces is only used to check that a class or interface
+    // does not declare the same generic interface parameterized with different
+    // type parameters.
+    // Thus, for the mixin situation, we add the interfaces implemented
+    // be the type variables.
+	refine Generics eq ClassDecl.implementedInterfaces() {
+		HashSet set = new HashSet();
+		if(hasSuperclass())
+			set.addAll(superclass().implementedInterfaces());
+		for(Iterator iter = interfacesIterator(); iter.hasNext(); ) {
+			TypeDecl decl = (TypeDecl)iter.next();
+		if ( decl instanceof TypeVariable ) { //.isTypeVariable()) {
+			TypeVariable tv = (TypeVariable) decl;
+			for ( int i=0; i<tv.getNumTypeBound(); i++) 
+				set.addAll(tv.getTypeBound(i).type().implementedInterfaces());
+			} 
+			else {
+				set.add(decl);
+				set.addAll(decl.implementedInterfaces());
+			}
+		}
+		return set;
+	}
+	refine Generics eq InterfaceDecl.implementedInterfaces() {
+		HashSet set= new HashSet();
+		set.addAll(typeObject().implementedInterfaces());
+
+		for(Iterator iter = superinterfacesIterator(); iter.hasNext(); ) {
+			TypeDecl decl = (TypeDecl)iter.next();
+		    if ( decl instanceof TypeVariable ) { //.isTypeVariable()) {
+			TypeVariable tv = (TypeVariable) decl;
+			for ( int i=0; i<tv.getNumTypeBound(); i++) 
+				set.addAll(tv.getTypeBound(i).type().implementedInterfaces());
+			} 
+			else {
+				set.add(decl);
+				set.addAll(decl.implementedInterfaces());
+			}
+		}
+		return set;
+	}
+
+	syn lazy boolean TypeDecl.isMixin () = false;
+	eq GenericClassDecl.isMixin() {
+		if ( hasSuperclass() && 
+	     superclass() instanceof TypeVariable ) //.isTypeVariable()) 
+		return true;
+		for (Iterator ifIt = interfacesIterator(); ifIt.hasNext(); ) {
+			    //	    if ( ((TypeDecl)ifIt.next()).isTypeVariable()) return true;
+			if ( ifIt.next() instanceof TypeVariable ) return true;
+		}
+		return false;
+	}
+	eq GenericInterfaceDecl.isMixin() {
+		for (Iterator ifIt = superinterfacesIterator(); ifIt.hasNext(); ) {
+			if ( ifIt.next() instanceof TypeVariable ) return true;
+		    //	    if ( ((TypeDecl) ifIt.next()).isTypeVariable()) return true;
+		}
+		return false;
+	}
+
+	refine GenericsSubtype eq ParInterfaceDecl.supertypeParClassDecl(ParClassDecl type) {
+		if ( type.genericDecl().isMixin()) {
+		    // test the mixin supertype.
+			if ( type.hasSuperclass() && type.superclass().subtype(this))
+				return true;
+			for ( Iterator ifIt = type.interfacesIterator(); ifIt.hasNext(); )
+				if ( ((TypeDecl) ifIt.next()).subtype(this))
+					return true;
+			}
+			return GenericsSubtype.ParInterfaceDecl.supertypeParClassDecl(type);
+		}
+
+	refine GenericsSubtype eq ParClassDecl.supertypeParClassDecl(ParClassDecl type) {
+		if ( type.genericDecl().isMixin() &&
+			type.hasSuperclass() && type.superclass().subtype(this))
+			return true;
+		return GenericsSubtype.ParClassDecl.supertypeParClassDecl(type);
+	}
+
+	refine GenericsSubtype eq ParInterfaceDecl.supertypeParInterfaceDecl(ParInterfaceDecl type) {
+		if ( type.genericDecl().isMixin()) {
+			for (Iterator ifIt = type.superinterfacesIterator(); ifIt.hasNext(); ) {
+				if ( ((TypeDecl) ifIt.next()).subtype(this))
+					return true;
+			}
+		}
+		return GenericsSubtype.ParInterfaceDecl.supertypeParInterfaceDecl(type);
+	}
+}

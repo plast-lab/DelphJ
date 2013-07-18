@@ -1,0 +1,823 @@
+aspect MJTypeCheckCore {
+
+	syn lazy boolean FieldDeclaration.isUniqueFrom(FieldDeclaration f) {
+		if ( this == f ) return false;
+
+		Collection uniTypeVars = new ArrayList(f.patternTypeVariables());
+		uniTypeVars.addAll(patternTypeVariables());
+
+		Collection uniNameVars = new ArrayList(f.patternNameVariables());
+		uniNameVars.addAll(patternNameVariables());
+
+		HashMap uniMap = new HashMap();
+
+		if ( !this.canUnifySignature(f, uniMap, uniTypeVars, uniNameVars))
+			return true;
+
+		if ( !f.type().unifiesWith(this.type(), uniMap, uniTypeVars))
+			return true;
+
+		// check whether unification mapping cause mutually exclusive
+		// pattern conditions.
+		Collection patternConditions = new ArrayList();
+		patternConditions.addAll(patternConditions());
+		patternConditions.addAll(f.patternConditions());
+		if ( Program.hasMutualExclusiveConditions(patternConditions, uniMap))
+			return true;
+
+		// if signature can unify, they are still unique if the host types
+		// are different.
+		return !hostType().subtype(f.hostType()) &&
+		!f.hostType().subtype(hostType());
+	}
+
+    /**
+     * This method is unique from m if
+     * 1. their signatures (method name + parameters) do not unify  OR
+     * 2. if signatures unify, return types unify, and they are not defined
+     *    in the same type. (i.e. defined in sub/super class) OR
+     * 3. if 1 and 2 both fails, the unification mapping causing the
+     *    non-uniqueness cause mutually exclusive pattern conditions.
+     **/
+    syn lazy boolean MethodDecl.isUniqueFrom(MethodDecl m) {
+    	if ( this == m) return false;
+
+    	Collection uniTypeVars = new ArrayList(m.patternTypeVariables());
+    	uniTypeVars.addAll(patternTypeVariables());
+
+    	Collection uniNameVars = new ArrayList(m.patternNameVariables());
+    	uniNameVars.addAll(patternNameVariables());
+
+    	HashMap uniMap = new HashMap();
+
+	// unify signature.
+    	if (!canUnifySignature(m, uniMap, uniTypeVars, uniNameVars))
+    		return true;
+
+	// in order for the pattern conditions to be checked, we have to try
+	// to unify return type.
+    	boolean retTypeUnifies =
+    	m.type().unifiesWith(this.type(), uniMap, uniTypeVars);
+
+	// check whether unification mapping cause mutually exclusive
+	// pattern conditions.
+    	Collection patternConditions = new ArrayList();
+    	patternConditions.addAll(patternConditions());
+    	patternConditions.addAll(m.patternConditions());
+    	if ( Program.hasMutualExclusiveConditions(patternConditions, uniMap))
+    		return true;
+
+    	if ( !hostType().subtype(m.hostType()) &&
+    		!m.hostType().subtype(hostType())) 
+    		return false;
+
+	// if this one's return type can be unified with m's return type,
+	// then we need to check for possible override.
+    	if ( retTypeUnifies )
+    		return this.overrides(m);
+
+    	return false;
+    }
+
+    /**
+     * Refining overrides to call signatureOverrides(m), instead of
+     * simply comparing method signatures as strings.
+     **/
+    refine LookupMethod eq MethodDecl.overrides(MethodDecl m) =
+    !isStatic() && !m.isPrivate() && m.accessibleFrom(hostType()) && 
+    hostType().instanceOf(m.hostType()) &&
+    signatureOverrides(m);
+
+    /**
+     * Refining hides to call signatureOverrides(m), instead of
+     * simply comparing method signatures as strings.
+     **/
+    refine LookupMethod eq MethodDecl.hides(MethodDecl m) =
+    isStatic() && !m.isPrivate() && m.accessibleFrom(hostType()) && 
+    hostType().instanceOf(m.hostType()) && 
+    signatureOverrides(m);
+
+    /**
+     * If both this and m are staticly declared methods, then just compare
+     * signatures as strings, the way it was done in JastAddJ
+     *
+     * If m is reflectively declared, for this to override m, this must
+     * be subsumed by m's iterator, and the signatures unify after
+     * substitutions.
+     **/
+    syn lazy boolean MethodDecl.signatureOverrides(MethodDecl m) {
+    	if ( this == m ) return true;
+	// if static, then compare signature. This is how it was specified
+	// in Jastadd before.
+    	if ( !m.isReflectiveDecl())
+    		return m.signature().equals(signature());
+
+    	StaticForMethodDecl sm = (StaticForMethodDecl) m;
+
+	// 1. is this in the iterator decl range of sm?
+    	HashMap uniMap = new HashMap();
+    	if ( this.isSubsumedBy(sm.getIteratorDecl(), uniMap)) { 
+	    // apply mapping and check signature.
+    		if ( canUnifySignature(sm, uniMap, Collections.EMPTY_LIST,
+    			Collections.EMPTY_LIST)) {
+		// after apply substitutions, type() should be a subtype of m's type.
+    			return type().substitute(uniMap).type().subtype(sm.type().substitute(uniMap).type());
+    	}
+    }
+    return false;
+}
+
+    /**
+     * 
+     **/
+    eq StaticForMethodDecl.signatureOverrides(MethodDecl m) {
+    	if (this == m) return true;
+
+	// if this method 
+	// 1. copies the signature of a (positive) pattern exactly, and 
+	// 2. the base type of the pattern is a subtype of m's host type 
+	// Then overrides is true.
+    	Pattern primePattern = getIteratorDecl().getPattern();
+    	if ( primePattern.sameSignature(this) &&
+    		primePattern.getBaseSet().type().subtype(m.hostType()))
+    		return true;
+    	for ( int i=0; i<getIteratorDecl().getNumNestedPattern(); i++) {
+    		Pattern np = getIteratorDecl().getNestedPattern(i);
+    		if ( np.isPositive() && np.sameSignature(this) &&
+    			np.getBaseSet().type().subtype(m.hostType()))
+    			return true;
+    	}
+
+        // 1. Is m in the range of this' iterator?
+    	Map uniMap = new HashMap();
+    	if ( !m.isSubsumedBy(getIteratorDecl(), uniMap)) {
+            // fetch method named by this's name in m's host type.
+    		if ( isNameVariable(getID()) || containsNameVariable(getID())) {
+    			Identifier id = new Identifier(getID(), this.getIteratorDecl());
+    			HashMap possOverrides = m.hostType().memberMethodsAndMap(id);
+
+                // is m one of the possible override methods?
+    			boolean possOv = false;
+    			for ( Iterator ovIt = possOverrides.keySet().iterator(); 
+    				ovIt.hasNext();) 
+    				if ( m == ovIt.next()) { possOv = true; break; }
+
+                // if m is not a method that could be possibly overriden by
+                // this, then just return.
+    			if ( !possOv ) return false;
+
+                // get the unification map again and check signature and ret type.
+                // TODO: inefficient. already calculated this when getting
+                // possible overrides.
+                // clear uniMap first.
+    			uniMap = (Map) possOverrides.get(m);
+    		} else {
+    			Collection possOverrides = m.hostType().memberMethods(getID());
+                // is m one of the possible override methods?
+    			boolean possOv = false;
+    			for ( Iterator ovIt = possOverrides.iterator(); 
+    				ovIt.hasNext();)
+    				if ( m == ovIt.next()) { possOv = true; break; }
+                // if m is not a method that could be possibly overriden by
+                // this, then just return.
+    			if ( !possOv ) return false;		
+
+    			uniMap = new HashMap();
+    		}
+    	}
+
+	    // check signatures unify using uniMap.
+    	if ( substitute(uniMap).canUnifySignature(m.substitute(uniMap), uniMap,
+    		Collections.EMPTY_LIST, Collections.EMPTY_LIST))
+    		return type().substitute(uniMap).type().subtype(m.type().substitute(uniMap).type());
+
+    	return false;
+    }
+
+    syn lazy boolean IteratorDecl.subsumes(IteratorDecl that, HashMap uniMap) {
+    	if ( this == that ) return true;
+
+	// first check whether the primary pattern of this subsumes
+	// primary pattern of that.
+    	if ( !getPattern().subsumes(that.getPattern(), uniMap))
+    		return false;
+
+	// Each nested pattern of that must be implied by a nested pattern
+	// of this.
+    	for ( int i=0; i<that.getNumNestedPattern(); i++) {
+    		boolean sat = false;
+    		for ( int j=0; j<getNumNestedPattern(); j++) {
+    			if (getNestedPattern(j).implies(that.getNestedPattern(i), uniMap)) {
+    				sat = true;
+    				break;
+    			}
+    		}
+    		if ( !sat ) return false;
+    	}
+
+	/*
+	return nestedPatternSatisfiedBy(uniMap) &&
+	    that.nestedPatternSatisfiedBy(uniMap);
+	*/
+	    return true;
+	}
+
+    /*
+    syn lazy boolean IteratorDecl.nestedPatternSatisfiedBy(HashMap uniMap) {
+	for ( int i=0; i<getNumNestedPattern(); i++ ) {
+	    if ( !getNestedPattern(i).satisfiedBy(uniMap))
+		return false;
+	}	
+	return true;
+    }
+    */
+
+    syn lazy boolean BodyDecl.isSubsumedBy(IteratorDecl id, Map map) {
+	// 2. BodyDecl must be within range of the primary pattern.
+    	if ( !this.isSubsumedBy(id.getPattern(), map))
+    		return false;
+
+	// 3. All nested patterns must be satisfied by the mapping.
+    	for ( int i=0; i<id.getNumNestedPattern(); i++ ) {
+    		if ( !id.getNestedPattern(i).satisfiedBy(map))
+    			return false;
+    	}
+
+    	return true;
+    }
+
+    syn lazy boolean BodyDecl.isSubsumedBy(Pattern p, Map map) = false;
+    eq FieldDeclaration.isSubsumedBy(Pattern p, Map map) = 
+    p.subsumesFieldDeclaration(this, map);
+    eq MethodDecl.isSubsumedBy(Pattern p, Map map) = p.subsumesMethodDecl(this, map);
+
+    syn lazy boolean Pattern.subsumesMethodDecl(MethodDecl md, Map map) = false;
+    eq MethodPattern.subsumesMethodDecl(MethodDecl md, Map map) {
+	// 1, hostType of md has to be a supertype of pattern's base type.
+    	if ( !getBaseSet().type().subtype(md.hostType()))
+    		return false;
+
+    	PatternMethodDecl patternMd = patternMethodDecl();
+	// 2. we need to be able to unify the signature and the return type
+    	if ( !md.canUnifySignature(patternMd, map, 
+    		patternTypeVariables(),
+    		patternNameVariables()) ||
+	     // check return type.
+    		!md.type().unifiesWith(patternMd.type(),map, 
+    			patternTypeVariables()) ||
+	     // check modifiers.
+    		!md.getModifiers().unifiesWith(patternMd.getModifiers()))
+    		return false;
+
+    	return true;
+    }
+
+    syn lazy boolean Pattern.subsumesFieldDeclaration(FieldDeclaration fd, Map map) = false;
+    eq FieldPattern.subsumesFieldDeclaration(FieldDeclaration fd, Map map) {
+	// 1, hostType of fd has to be a supertype of pattern's base type.
+    	if ( !getBaseSet().type().subtype(fd.hostType()))
+    		return false;
+
+    	PatternFieldDeclaration patternFd = patternFieldDeclaration();
+    	if ( !fd.canUnifySignature(patternFd, map,
+    		patternTypeVariables(),
+    		patternNameVariables()) ||
+    		!fd.type().unifiesWith(patternFd.type(), map, 
+    			patternTypeVariables()) ||
+	     // check modifiers.
+    		!fd.getModifiers().unifiesWith(patternFd.getModifiers()))
+    		return false;
+    	return true;
+    }
+
+    syn lazy boolean Pattern.satisfiedBy(Map uniMap)  = false;
+    eq NestedMethodPattern.satisfiedBy(Map uniMap) {
+	// substitute pattern.
+    	NestedMethodPattern subed = substitute(uniMap);
+    	PatternMethodDecl nmd = subed.patternMethodDecl();
+
+	// expand the methods in the pattern after substitution.
+    	Map methods = subed.getBaseSet().type().unrestrictedMethodsSignatureMap();	
+    	int matched = 0;
+    	PatternMethodDecl pmd = subed.patternMethodDecl();
+
+    	java.util.List flattenedMethodsList = flatMap(methods);
+
+    	for ( Iterator mIt = flattenedMethodsList.iterator(); mIt.hasNext(); ) {
+    		MethodDecl md = (MethodDecl) mIt.next();
+
+    		if ( md.isSubsumedBy(subed, uniMap)) {
+		// this md is in the range of the pattern,
+		// - if the pattern is a positive one, then it is satisfied.
+		// - if the pattern is negative, then it is definitely not sat.
+    			if ( getIsPositive()) {
+    				if ( getIsErrorCondition()) {
+			// error! 
+    					error("Error condition " + 
+    						this.toString() + " is violated by " +
+    						this.enclosingBodyDecl().hostType().toString());
+    					return false;
+    				} return true;
+    			} return false;
+    		} else {
+    			if ( !isPositiveCondition() && !md.isUniqueFrom(nmd)) {
+    				if ( getIsErrorCondition()) {
+			// this is an error some ... condition.
+			// if md is not definitely unique from this,
+			// then there's the possibilty there is some such 
+			// field.
+    					error("Error condition " + this.toString() +
+    						" is violated by " + this.enclosingBodyDecl().hostType().toString());
+    				}
+		    // if the pattern is negative and the method is
+		    // not definitely unique from the pattern, 
+		    // then the condition is not satisfied.
+    				return false;
+    			}
+    		}
+    	}
+
+    	if ( getIsErrorCondition() && !getIsPositive()) {
+	    // this is : error no ... 
+	    // If we have not found a method that fits the pattern,
+	    // then this is an error condition.
+    		error("Error condition " + this.toString() +
+    			" is violated by " + this.enclosingBodyDecl().hostType().toString());
+    	}
+
+    	return !isPositiveCondition();
+    }
+    eq NestedFieldPattern.satisfiedBy(Map uniMap) {
+    	NestedFieldPattern subed = substitute(uniMap);
+
+	// expand the fields in the pattern after substitution.
+    	SimpleSet fields = subed.getBaseSet().type().unrestrictedFields();
+    	PatternFieldDeclaration pfd = subed.patternFieldDeclaration();
+    	for ( Iterator fIt = fields.iterator(); fIt.hasNext(); ) {
+    		FieldDeclaration fd = (FieldDeclaration) fIt.next();
+    		if ( fd.isSubsumedBy(subed, uniMap)) {
+		//		return isPositiveCondition();
+    			if ( getIsPositive()) {
+    				if ( getIsErrorCondition()) {
+			// error! 
+    					error("Error condition " + 
+    						this.toString() + " is violated by " +
+    						this.enclosingBodyDecl().hostType().toString());
+    					return false;
+    				} return true;
+    			} return false;
+	    } /*else if (!isPositiveCondition() &&
+			// if condition is negative and fd is not absolutely
+			// excluded by the pattern, then return false.
+			!fd.isUniqueFrom(subed.patternFieldDeclaration()))
+		return false;
+	      */
+		else {
+			if ( !isPositiveCondition() && !fd.isUniqueFrom(pfd)) {
+				if ( getIsErrorCondition()) {
+			// this is an error some ... condition.
+			// if md is not definitely unique from this,
+			// then there's the possibilty there is some such 
+			// field.
+					error("Error condition " + this.toString() +
+						" is violated by " + this.enclosingBodyDecl().hostType().toString());
+				}
+		    // if the pattern is negative and the method is
+		    // not definitely unique from the pattern, 
+		    // then the condition is not satisfied.
+				return false;
+			}
+		}
+	}
+
+	// if we're here, if it's a negative pattern, this return true;
+	//	return !isPositive();
+
+	if ( getIsErrorCondition() && !getIsPositive()) {
+	    // this is : error no ... 
+	    // If we have not found a method that fits the pattern,
+	    // then this is an error condition.
+		error("Error condition " + this.toString() +
+			" is violated by " + this.enclosingBodyDecl().hostType().toString());
+	}
+
+	return !isPositiveCondition();
+}
+
+	eq TrueNestedPattern.satisfiedBy(Map uniMap) = true;
+
+	public static boolean Program.hasMutualExclusiveConditions(Collection patternConditions, Map uniMap) {
+		for ( Iterator outerIt = patternConditions.iterator(); outerIt.hasNext(); ) {
+			Pattern p1 = (Pattern) outerIt.next();
+		    // apply substitution first.
+			Pattern p1sub = p1.substitute(uniMap);
+
+			for ( Iterator innerIt = patternConditions.iterator(); innerIt.hasNext(); ) {
+				Pattern p2 = (Pattern) innerIt.next();
+				if ( p1 == p2) continue;
+
+				Pattern p2sub = p2.substitute(uniMap);
+			if (p1sub.isMutuallyExclusiveFrom(p2sub, new HashMap())) // uniMap))
+	return true;
+	}
+	}
+	return false;
+	}
+
+	syn lazy boolean Pattern.isMutuallyExclusiveFrom(Pattern p2, Map uniMap) = false;
+	eq MethodPattern.isMutuallyExclusiveFrom(Pattern p2, Map uniMap) = p2.isMutuallyExclusiveFromMethodPattern(this, uniMap);
+	eq FieldPattern.isMutuallyExclusiveFrom(Pattern p2, Map uniMap) = p2.isMutuallyExclusiveFromFieldPattern(this, uniMap);
+
+	syn lazy boolean Pattern.isMutuallyExclusiveFromFieldPattern(FieldPattern p2, Map uniMap) = false;	   
+
+	eq FieldPattern.isMutuallyExclusiveFromFieldPattern(FieldPattern p2, Map uniMap) {
+		if ( isPositiveCondition() && p2.isPositiveCondition()) {
+		    // this and p2 are mutually exclusive if 
+		    // - their host types are in subtyping relationships.
+		    // - their names unify,
+		    // - their types do not unify
+			TypeDecl rb = this.reflectiveBaseType().substitute(uniMap).type();
+			TypeDecl p2rb = p2.reflectiveBaseType().substitute(uniMap).type();
+			if ( ! rb.subtype(p2rb) && ! p2rb.subtype(rb))
+				return false;
+
+			return this.identifier().substitutedName(uniMap).equals(p2.identifier().substitutedName(uniMap)) &&
+			!getTypeAccess().type().substitute(uniMap).type().equals(p2.getTypeAccess().type().substitute(uniMap).type());
+		} else if ( isPositiveCondition() ) {
+			return p2.subsumes(this, uniMap);
+		} else if ( p2.isPositiveCondition()) {
+			return this.subsumes(p2, uniMap);
+		}
+		return false;
+	}
+
+	syn lazy boolean Pattern.isMutuallyExclusiveFromMethodPattern(MethodPattern p2, Map uniMap) = false;
+	eq MethodPattern.isMutuallyExclusiveFromMethodPattern(MethodPattern p2, Map uniMap) {
+		if ( isPositiveCondition() && p2.isPositiveCondition()) {
+		    // if p1 and p2 have same method argument types and name, but
+		    // different return types, then these conditions
+		    // are disjoint.
+			TypeDecl rb = this.reflectiveBaseType().substitute(uniMap).type();
+			TypeDecl p2rb = p2.reflectiveBaseType().substitute(uniMap).type();
+			if ( ! rb.subtype(p2rb) && ! p2rb.subtype(rb))
+				return false;
+
+			java.util.List p1params = substitutedParameterTypes(uniMap);
+			java.util.List p2params = p2.substitutedParameterTypes(uniMap);
+
+			if ( !sameParameterLists(p1params,p2params))
+				return false;
+
+		    // name?
+
+			if ( !getTypeAccess().type().substitute(uniMap).type().equals(p2.getTypeAccess().type().substitute(uniMap).type()))
+				return true;
+		} else if ( isPositiveCondition() ) {
+		    // If this is +, p2 is -, and p2 subsumes this, then 
+		    // this and p2 are mutually exclusive
+			return p2.subsumes(this, uniMap);
+		} else if ( p2.isPositiveCondition()) {
+			return this.subsumes(p2, uniMap);
+		}
+		return false;
+	}
+
+	public boolean Pattern.sameParameterLists(java.util.List p1params, java.util.List p2params) {
+		if ( p1params.size() != p2params.size()) 
+			return false;
+		for ( int i=0; i<p1params.size(); i++) {
+			if (!p1params.get(i).equals(p2params.get(i)))
+				return false;
+		}
+		return true;
+	}
+
+	syn lazy boolean MethodDecl.canOnewayUnifyTo(MethodDecl m) {
+		return canUnifySignature(m, new HashMap(), 
+			patternTypeVariables(),
+			patternNameVariables());
+	}
+
+	public boolean IteratorDecl.isNameVariable(String name, Collection uniNameVars) {
+		for ( Iterator nameIt = uniNameVars.iterator(); nameIt.hasNext(); ) {
+			PatternNameVariable pv = (PatternNameVariable) nameIt.next();
+			if ( pv.getID().equals(name) && 
+				this == pv.enclosingRefIterator())
+				return true;
+		}
+		return false;
+	}
+
+	public PatternNameVariable IteratorDecl.getNameVariable(String name, Collection uniNameVars) {
+		for ( Iterator nameIt = uniNameVars.iterator(); nameIt.hasNext(); ) {
+			PatternNameVariable pv = (PatternNameVariable) nameIt.next();
+			if ( pv.getID().equals(name) && 
+				this == pv.enclosingRefIterator())
+				return pv;
+		}
+		return null;
+	}
+	syn lazy boolean Modifiers.declaredFromPattern() {
+		ASTNode p = parent;
+		while ( p != null ) {
+			if ( p instanceof Pattern ) return true;
+			else if ( p instanceof PatternMethodDecl) return true;
+			else if ( p instanceof PatternFieldDeclaration) return true;
+			p = p.parent;
+		}
+		return false;
+	}
+
+	syn lazy boolean Pattern.implies(Pattern p, Map uniMap ) {
+		if ( this == p ) return true;
+		if ( isPositive() ^ p.isPositive()) return false;
+		
+		if ( isPositive()) {
+		    // +THIS implies +p iff p subsumes THIS
+			return p.subsumes(this, uniMap);
+		} else
+		    // -THIS implies -p iff THIS subsumes p
+		return subsumes(p, uniMap);
+	}
+	eq TrueNestedPattern.implies(Pattern p, Map uniMap) = true;
+
+	    // Error conditions can be considered True conditions.
+	    // If they are not true, it is caught at expansion time.
+	eq NestedFieldPattern.implies(Pattern p, Map uniMap) {
+		if ( getIsErrorCondition())
+			return true;
+		return super.implies(p, uniMap);
+	}
+	eq NestedMethodPattern.implies(Pattern p, Map uniMap) {
+		if ( getIsErrorCondition())
+			return true;
+		return super.implies(p, uniMap);
+	}
+
+	syn lazy Pattern Pattern.difference(Pattern p, Map uniMap) {
+		if ( isPositive() && p.subsumes(this, uniMap) ||
+			!isPositive() && this.subsumes(p, uniMap)) {
+			TrueNestedPattern tnp = new TrueNestedPattern(); 
+		tnp.bypassErrorChecking = true;
+		return tnp;
+	}
+	return this;
+	}
+	eq TrueNestedPattern.difference(Pattern p, Map uniMap) {
+		if ( p instanceof TrueNestedPattern ) return this;
+
+		// flip the sign of p, apply mapping to rest.
+		Pattern np = p.substitute(uniMap);
+		np.flipSign();
+		return np;
+	}
+
+	syn lazy boolean Pattern.subsumes(Pattern p, Map uniMap) = false;
+	eq EmptyPrimaryPattern.subsumes(Pattern p, Map uniMap) = true;
+	eq MethodPattern.subsumes(Pattern p, Map uniMap) = p.subsumedByMethodPattern(this, uniMap);
+	eq FieldPattern.subsumes(Pattern p, Map uniMap) = p.subsumedByFieldPattern(this, uniMap);
+
+	    // error nested conditions are always subsumed.
+	eq NestedFieldPattern.subsumedByFieldPattern(FieldPattern p, Map uniMap) {
+		if ( getIsErrorCondition())
+			return true;
+		return super.subsumedByFieldPattern(p, uniMap);
+	}
+	eq NestedMethodPattern.subsumedByMethodPattern(MethodPattern p, Map uniMap) {
+		if ( getIsErrorCondition()) return true;
+		return super.subsumedByMethodPattern(p, uniMap);
+	}
+
+	syn lazy boolean Pattern.subsumedByFieldPattern(FieldPattern p, Map uniMap) = false;
+	eq FieldPattern.subsumedByFieldPattern(FieldPattern p, Map uniMap) {
+		if ( this == p ) return true;
+
+		if ( !p.reflectiveBaseType().subtype(reflectiveBaseType())) {
+		    /* Doesn't really work without full normalization of all
+		       ranges.
+		    // we can deconstruct this pattern to be a union of patterns,
+		    // matching each field in its base type.
+		    // This is only possible if pRefBase is not a type variable.
+		    TypeDecl pRefBase = this.reflectiveBaseType();
+		    if ( pRefBase instanceof TypeVariable )
+			return false;
+		    
+		    // F1 U F2 U ... Fn
+		    // if Fi can be matched by pattern, Fi << this
+		    // and Fi[this] << p, wher Fi[this] is Fi with substitution from Fi << this applied.
+		    // then the part Fi is subsumed by p.
+		    // Fi for all i needs to be subsumed by p.
+	 	    Collection refFields = pRefBase.bcFields();
+		    for( Iterator rfIt = refFields.iterator(); rfIt.hasNext(); ) {
+			FieldDeclaration fd = (FieldDeclaration) rfIt.next();
+			HashMap map = new HashMap();
+
+			// Want: this << p
+			// If this << fd, and fd << p , then  this << p
+			// first apply reverse of map to fd.
+			if ( this.subsumesFieldDeclaration(fd, map)) {
+
+			    HashMap rMap = new HashMap();
+			    for ( Iterator mkIt = map.keySet().iterator(); mkIt.hasNext(); ) {
+				PatternVariable tv = (PatternVariable) mkIt.next();
+			    	Object mapped = map.get(tv);
+				if ( mapped instanceof PatternVariable )
+				    rMap.put(mapped, tv);
+				else if ( mapped instanceof Identifier ) {
+				    Identifier id = (Identifier) mapped;
+				    if ( id.isPureNameVariable())
+					rMap.put(id.namevariable, 
+						 new Identifier((PatternNameVariable) tv));
+				}
+			    }			    
+			    
+			    if ( fd instanceof StaticForFieldDeclaration ) {
+				StaticForFieldDeclaration sfd = (StaticForFieldDeclaration) fd;
+				StaticForFieldDeclarationSubstituted ssfd = sfd.substitute(rMap);
+				if ( sfd.isSubsumedBy(p, (HashMap) uniMap)) {
+				    // found it.
+				    return true;
+				}
+			    } else {
+				if ( fd.isSubsumedBy(p, (HashMap) uniMap ))
+				    return true;
+			    }
+			}
+		    }
+		    */
+		    return false;
+		}
+
+		PatternFieldDeclaration thisFd = this.patternFieldDeclaration();
+		PatternFieldDeclaration pFd = p.patternFieldDeclaration();
+
+		if ( !thisFd.canUnifySignature(pFd, uniMap, p.patternTypeVariables(), p.patternNameVariables()))
+			return false;
+
+		// check that types can be unified.
+		if (!p.getTypeAccess().type().unifiesWith(getTypeAccess().type(), uniMap, p.patternTypeVariables()))
+			return false;
+		
+		// check modifiers unify.
+		return p.getModifiers().unifiesWith(getModifiers());
+
+		//	return false;
+	}
+	syn lazy boolean Pattern.subsumedByMethodPattern(MethodPattern p, Map uniMap) = false;
+	eq MethodPattern.subsumedByMethodPattern(MethodPattern p, Map uniMap) {
+		if ( this == p ) return true;
+
+		// this's base type must be a supertype of p's base type.
+		TypeDecl thisBaseType = reflectiveBaseType().substitute(uniMap).type();
+		TypeDecl pBaseType = p.reflectiveBaseType().substitute(uniMap).type();
+		//	if ( !p.reflectiveBaseType().subtype(reflectiveBaseType()))
+		if ( !pBaseType.subtype(thisBaseType))
+			return false;
+		
+		// signitures must unify using this' type and name variables.
+		PatternMethodDecl thisMd = patternMethodDecl();
+		PatternMethodDecl pMd = p.patternMethodDecl();
+
+		// name + arg types unify
+		if ( !thisMd.canUnifySignature(pMd, uniMap, p.patternTypeVariables(), p.patternNameVariables())) 
+			return false;
+
+		// return types unify
+		if ( !pMd.type().unifiesWith(getTypeAccess().type(), uniMap, p.patternTypeVariables()))
+			return false;
+
+		// exceptions must unify.
+		if ( !TypeDecl.typeListUnifies(exceptionTypes(),p.exceptionTypes(),
+			uniMap, p.patternTypeVariables()))
+			return false;
+
+		return true;
+	}
+
+	public ArrayList MethodDecl.parameterTypes () { 
+		ArrayList list = new ArrayList();
+		for ( int i=0; i<getNumParameter(); i++ )
+			list.add(getParameter(i).type());
+		return list;
+	}
+	public ArrayList MethodDecl.exceptionTypes () {
+		ArrayList list = new ArrayList();
+		for ( int i=0; i<getNumException(); i++) 
+			list.add(getException(i).type());
+		return list;
+	}
+
+	public ArrayList MethodPattern.parameterTypes() {
+		ArrayList list = new ArrayList();
+		for ( int i=0; i<getNumParameter(); i++ )
+			list.add(getParameter(i).type());
+		return list;	
+	}
+	public ArrayList NestedMethodPattern.parameterTypes() {
+		ArrayList list = new ArrayList();
+		for ( int i=0; i<getNumParameter(); i++ )
+			list.add(getParameter(i).type());
+		return list;	
+	}
+	public ArrayList MethodPattern.exceptionTypes () {
+		ArrayList list = new ArrayList();
+		for ( int i=0; i<getNumException(); i++) 
+			list.add(getException(i).type());
+		return list;
+	}
+	public ArrayList NestedMethodPattern.exceptionTypes () {
+		ArrayList list = new ArrayList();
+		for ( int i=0; i<getNumException(); i++) 
+			list.add(getException(i).type());
+		return list;
+	}
+
+	refine Generics public void ParTypeAccess.typeCheck() {
+		Generics.ParTypeAccess.typeCheck();
+
+		// Check that types used for instantiation conforms to 
+		// interface/class requirement.
+		TypeDecl td = genericDecl();
+		if ( td.isUnknown()) {
+			return;
+		}
+
+		GenericTypeDecl gDecl = (GenericTypeDecl) td;
+		for ( int i=0; i<getNumTypeArgument(); i++) {
+			TypeVariable tv = ((GenericTypeDecl) gDecl.original()).getTypeParameter(i);
+			if (tv.isConstrainedTypeVariable()) {
+				if ( tv.mustbeClass() &&
+					(getTypeArgument(i).type().isTypeVariable() ? 
+						!((TypeVariable) getTypeArgument(i).type()).mustbeClass() : 
+						!getTypeArgument(i).type().isClassDecl()))
+					error("type argument " + i + " is not a class.");
+				if ( tv.mustbeInterface() &&
+						(getTypeArgument(i).type().isTypeVariable() ?
+							!((TypeVariable) getTypeArgument(i).type()).mustbeInterface() : !getTypeArgument(i).type().isInterfaceDecl()))
+						error("type argument " + i + " is not an interface.");
+			}
+		}	
+
+		// If the generic class must be expanded, then the type parameter used
+		// to parameterize it cannot be an inferred method type variable.
+		if ( td.needsExpansion()) {
+			for ( int i=0; i<getNumTypeArgument(); i++) {
+				if ( getTypeArgument(i).type().isTypeVariable() &&
+						boundByMethod((TypeVariable)getTypeArgument(i).type())) {
+						error("Cannot use inferred method type parameters to instantiate a generic type that needs expansion. This feature will be supported in the next version.");
+				}
+			}
+		}
+
+		// check that the parameterization does not violate any errorif 
+		// conditions.
+		TypeDecl ptd = type();
+		Collection<StaticForFieldDeclaration> sfields = ptd.reflectiveFields();
+		for ( StaticForFieldDeclaration sfd : sfields ) {
+			IteratorDecl id = sfd.getIteratorDecl();
+			if ( id.expandable())
+				// invoking this causes appropriate error msgs to be generated.
+				id.reflectiveElmts();
+		}
+
+		Collection<StaticForMethodDecl> smethods = ptd.reflectiveMethods();
+		for ( StaticForMethodDecl smd : smethods ) {
+			IteratorDecl id = smd.getIteratorDecl();
+			if ( id.expandable())
+				id.reflectiveElmts();
+		}
+	}
+
+    //    public void TypeAccess.typeCheck() {
+	refine Generics public void TypeAccess.typeCheck() {
+		Generics.TypeAccess.typeCheck();
+
+		TypeDecl t = type();
+		// Some types cannot be accessed as raw. But only report this
+		// as an error if this is not a child of an import statement.
+		if ( !fromImportDecl() && isRaw() && t instanceof ParTypeDecl && 
+			((ParTypeDecl) t).genericDecl().needsExpansion())
+			error(((ParTypeDecl) t).genericDecl().fullName() + 
+				" cannot be used as raw type.");
+
+		// type variables used in declaration must be bounded by the primary 
+		// pattern.
+		if ( t.isTypeVariable() && !inPatterns() && !bound((TypeVariable) t))
+			error(t.name() + " is not bound by a primary pattern " + 
+				"and cannot be used in code.");
+	}
+
+	syn lazy boolean TypeAccess.fromImportDecl() {
+		ASTNode parent = this.parent;
+		while ( parent != null ) {
+			if ( parent instanceof ImportDecl ) return true;
+			parent = parent.parent;
+		}
+		return false;
+	}
+
+	public void PatternMethodDecl.collectErrors() {}
+	public void PatternFieldDeclaration.collectErrors() {}
+	public void StaticForMethodDeclSubstituted.collectErrors(){}
+
+}

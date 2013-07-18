@@ -1,0 +1,459 @@
+import org.objectweb.asm.tree.*;
+
+aspect MJInstructionTransform {
+    
+    public class InsnTransformVisitor extends org.objectweb.asm.MethodAdapter {
+	public InsnList instructions = new InsnList();
+	java.util.List tryCatchBlocks = new java.util.ArrayList();
+	java.util.List localVariables = new java.util.ArrayList();
+	
+	int maxStack = 0;
+	int maxLocals = 0;
+
+	BodyDecl md;
+	ParClassDecl parClass;
+	Map substitutions;
+
+	// this variable is set if we are visiting instructions to be replicated for
+	// staticForStmt, within md.
+	StaticForStmt staticForStmt;
+	public InsnTransformVisitor(MethodVisitor mv, 
+				    ParClassDecl parClass,
+				    BodyDecl md,
+				    Map substitutions) {
+	    super(mv);
+	    this.md = md;
+	    this.parClass = parClass;
+	    this.substitutions = substitutions;
+	}
+
+	public InsnTransformVisitor(MethodVisitor mv, 
+				    ParClassDecl parClass,
+				    BodyDecl md,
+				    Map substitutions, 
+				    StaticForStmt staticForStmt) {
+	    this(mv, parClass, md, substitutions);
+	    this.staticForStmt = staticForStmt;
+	}
+
+	void changeMaxStack(int opcode) {
+	    int change =  BytecodeDebug.stackChange((byte)opcode);
+	    if ( change > 0 )
+		maxStack += change;
+	}
+
+	void changeMaxLocal(int opcode, int var) {
+	    int n;
+            if (opcode == Opcodes.LLOAD || opcode == Opcodes.DLOAD
+		|| opcode == Opcodes.LSTORE || opcode == Opcodes.DSTORE) {
+                n = var + 2;
+            } else {
+                n = var + 1;
+            }
+            if (n > maxLocals) {
+                maxLocals = n;
+            }
+	}
+
+	protected TypeDecl retrieveTypeFromContext(Access ta) {
+	    TypeDecl t = null;
+	    if ( staticForStmt != null )
+		t = staticForStmt.retrieveType(ta);
+	    else t = md.retrieveType(ta);
+
+	    t = t.substitute(substitutions).type();
+	    Access ta2 = (Access) t.substitute(parClass);
+	    if ( staticForStmt != null )
+		t = staticForStmt.retrieveType(ta2);
+	    else t = md.retrieveType(ta2);
+	    return t;
+	    //return t.substitute(substitutions).type();
+	}
+
+	protected TypeDecl retrieveOwnerType(String owner) {
+	    // parse owner to get the actual type.
+	    TypeDecl ownerType = null;
+	    if ( owner.startsWith("["))
+		ownerType = retrieveTypeFromDesc(owner);
+	    else
+		ownerType = md.parseConstantPoolName(owner);
+
+	    if ( ownerType.isRawType() && 
+		 ((ParTypeDecl) ownerType).genericDecl() == parClass.genericDecl())
+	    	ownerType = parClass;
+	    else if ( ownerType.needsExpansion()) {
+		ownerType = ownerType.substitute(substitutions).type();
+		Access ta2 = (Access) ownerType.substitute(parClass);
+		if ( staticForStmt != null )
+		    ownerType = staticForStmt.retrieveType(ta2);
+		else ownerType = md.retrieveType(ta2);
+		
+		//		ownerType = ownerType.substitute(substitutions).type();
+	    } 
+	    return ownerType;
+	}
+
+	protected String retrieveOwner(String owner) {
+	    // parse owner to get the type's package and real name.
+	    // we only need to change it if the owner involves type variables
+	    TypeDecl ownerType = retrieveOwnerType(owner);
+	    return ownerType.expandedConstantPoolName();
+	}
+
+	protected int retrieveOpcode(String owner, String name, String desc,
+				     int oldOpcode ) {
+	    BodyDecl bd = retrieveMethod(owner, name, desc);
+	    if ( bd != null ) {
+		if ( bd instanceof ConstructorDecl || 
+		     // this is a super call.
+		     (name.equals("<init>") && 
+		      parClass.hasSuperclass() && retrieveOwnerType(owner) == parClass.superclass()))
+		    return org.objectweb.asm.Opcodes.INVOKESPECIAL;
+		
+		MethodDecl m = (MethodDecl) bd;
+		if (m.isStatic()) 
+		    return org.objectweb.asm.Opcodes.INVOKESTATIC;
+		if (m.hostType().isInterfaceDecl())
+		    return org.objectweb.asm.Opcodes.INVOKEINTERFACE;
+
+                if(oldOpcode == org.objectweb.asm.Opcodes.INVOKESPECIAL)
+                     return org.objectweb.asm.Opcodes.INVOKESPECIAL;
+                 /*System.err.println("\nVirtual\nOwner = " + owner + 
+                                  "\nName = " +  name + 
+                                  "\nDesc =  " + desc + 
+                                  "\noldOpcode = "  + oldOpcode + 
+                                  "\nnewOpcode = " + org.objectweb.asm.Opcodes.INVOKEVIRTUAL +
+                                  "\nparClass = "  + parClass.hasSuperclass()  +
+                                  "\nretrieveOwnerType(" + owner + ") = "  + 
+                                        retrieveOwnerType(owner) +
+                                  "\nparClass.superclass() = " +  (parClass.hasSuperclass() ?
+                                                                   parClass.superclass().toString():" None") +
+                                  "\nsubtype ofBodyDecl  = " + bd.getClass()
+                                 );*/
+		return org.objectweb.asm.Opcodes.INVOKEVIRTUAL;	    
+	    }
+	    return oldOpcode;
+	}
+
+	protected BodyDecl retrieveMethod(String owner, String name, String desc) {
+	    TypeDecl ownerType = retrieveOwnerType(owner);
+	    // find the method in ownerType with name: name
+	    // and desciptor desc.
+	    String newDesc = retrieveMethodDesc(desc);
+
+	    // retrieve parameter types from newDesc.
+	    MethodDescriptor ndd = new MethodDescriptor(newDesc);
+	    if ( name.equals("<init>")) {
+		List newParamList = ownerType.isInnerType() ? 
+		    ndd.parameterListSkipFirst() : 
+		    ndd.parameterList();
+
+		// constructors.
+		Collection c = ((ClassDecl) ownerType).bcMethods();
+		for ( Iterator mIt = c.iterator(); mIt.hasNext(); ) {
+		    BodyDecl bd = (BodyDecl) mIt.next();
+		    if ( bd instanceof ConstructorDecl ) {
+			ConstructorDecl cd = (ConstructorDecl) bd;
+			if ( parameterSubtype(cd.getParameterList(),
+					      newParamList))
+			    return cd;
+		    }
+		}
+	    } else {
+		List newParamList = ndd.parameterList();
+		Collection c = ownerType.unrestrictedMemberMethods(retrieveName(name));
+		for ( Iterator mIt = c.iterator(); mIt.hasNext(); ) {
+		    MethodDecl thismd = (MethodDecl) mIt.next();
+		    if (thismd.name().equals(retrieveName(name)) &&
+			parameterSubtype(thismd.getParameterList(), 
+					 newParamList))
+			return thismd;
+		}
+	    }
+	    if ( Program.verbose())
+		System.err.println("WARNING: Cannot find method " +
+				   retrieveName(name) + retrieveMethodDesc(desc) + 
+				   " in type " + ownerType.name());
+	    return null;
+	}
+
+	protected String retrieveName(String name) {
+	    if ( staticForStmt != null )
+		return new Identifier(name, staticForStmt.refIterator()).substitutedName(substitutions);
+	    else if ( md.isSubstitutedStaticForDecl()) 
+		return new Identifier(name, ((SubstitutedStaticForDeclaration) md).getOriginal().getIteratorDecl()).substitutedName(substitutions);
+
+	    return new Identifier(name, md.refIterator()).substitutedName(substitutions);
+	    /*
+	      if ( md.isNameVariable(name)) 
+		return (String) substitutions.get(md.getNameVariable(name));
+	    return name;
+	    */
+	}
+
+
+	protected boolean parameterSubtype(List pl1, List pl2) {
+	    if ( pl1.getNumChild() == pl2.getNumChild()) {
+		boolean matched = true;
+		for ( int i=0; i<pl1.getNumChild(); i++) {
+		    TypeDecl pl1Type = md.retrieveType(((ParameterDeclaration) pl1.getChild(i)).type().substitute(parClass));
+		    TypeDecl pl2Type = md.retrieveType(((ParameterDeclaration) pl2.getChild(i)).getTypeAccess());
+		    if (!pl1Type.subtype(pl2Type)) {
+			matched = false;
+			break;
+		    }
+		}
+		return matched;
+	    }
+	    return false;
+	}
+
+
+	protected TypeDecl retrieveTypeFromDesc(String desc) {
+	    Signatures s = new Signatures(desc);
+	    Access ta = s.typeSignature();
+	    
+	    TypeDecl t = retrieveTypeFromContext(ta);
+	    //	    TypeDecl t = md.retrieveType(ta);
+	    return t.substitute(substitutions).type();
+	}
+
+	protected String retrieveFieldDesc(String desc) {
+	    TypeDecl t = retrieveTypeFromDesc(desc);
+	    if ( t.isUnknown()) {
+		System.err.println("unknown type: " + desc);
+		return desc;
+	    }
+	    return t.typeDescriptor();
+	}
+
+	protected TypeDecl retrieveMethodReturnType(String desc) {
+	    // parse desc name.
+	    Signatures.MethodSignature ms = new Signatures.MethodSignature(desc);
+	    // return type
+	    Access rt = (Access) ms.returnType();
+	    TypeDecl newRt = retrieveTypeFromContext(rt);
+	    return newRt;
+	}
+
+	protected java.util.List<TypeDecl> retrieveMethodParams(String desc) {
+	    // parse desc name.
+	    Signatures.MethodSignature ms = new Signatures.MethodSignature(desc);
+	    ArrayList<TypeDecl> pList = new ArrayList();
+	    
+	    for ( Iterator ptIt = ms.parameterTypes().iterator();
+		  ptIt.hasNext(); ) {
+		// TODO: fix imported from Lime. CHeck whether works.
+		//		TypeAccess ta = (TypeAccess) ptIt.next();
+		Access ta = (Access) ptIt.next();
+		TypeDecl t = retrieveTypeFromContext(ta);
+		List argList = t.expandAccessList(substitutions);
+
+		for ( int i=0; i<argList.getNumChild(); i++)
+		    pList.add(((Access) argList.getChild(i)).type());
+	    }
+	    return pList;
+	}
+
+	protected String retrieveMethodDesc(String desc) {
+	    // parse desc name.
+	    Signatures.MethodSignature ms = new Signatures.MethodSignature(desc);
+	    StringBuffer buf = new StringBuffer();
+	    // parameter names.
+	    buf.append("(");
+	    for ( Iterator ptIt = ms.parameterTypes().iterator(); ptIt.hasNext(); ) {
+		// TODO: fix imported from Lime. CHeck whether works.
+		//		TypeAccess ta = (TypeAccess) ptIt.next();
+		Access ta = (Access) ptIt.next();
+
+		//		List argList = md.retrieveType(ta).expandAccessList(substitutions);
+		TypeDecl t = retrieveTypeFromContext(ta);
+		List argList = t.expandAccessList(substitutions);
+
+		for ( int i=0; i<argList.getNumChild(); i++)
+		    buf.append(((Access) argList.getChild(i)).type().typeDescriptor());
+	    }
+	    buf.append(")");
+
+	    // return type
+	    Access rt = (Access) ms.returnType();
+	    //	    Access newRt = md.retrieveType(rt).substitute(substitutions);
+	    //     buf.append(newRt.type().typeDescriptor());
+	    TypeDecl newRt = retrieveTypeFromContext(rt);
+	    buf.append(newRt.typeDescriptor());
+
+	    // exceptions.
+	    /*
+	    if ( ms.hasExceptionList()) {
+		for ( int i=0; i<ms.exceptionList().getNumChild(); i++) {
+		    TypeAccess et = (TypeAccess) ms.exceptionList().getChild(i);
+		    Access newEt = md.retrieveType(et).substitute(substitutions);
+		    buf.append("^" + newEt.type().classTypeSignature());
+		}
+		}*/
+	    return buf.toString();
+	}
+
+
+	public void visitFieldInsn(int opcode, String owner, String name, String desc) {
+	    // if this is a GET instruction,
+	    // change stack according to field type.
+	    if ( opcode == org.objectweb.asm.Opcodes.GETFIELD ||
+		 opcode == org.objectweb.asm.Opcodes.GETSTATIC ) {
+		TypeDecl ft = retrieveTypeFromDesc(desc);
+		if ( ft.isDouble() || ft.isLong())
+		    maxStack += 2;
+		else maxStack += 1;
+	    }
+
+	    instructions.add(new FieldInsnNode(opcode, 
+					       retrieveOwner(owner), 
+					       retrieveName(name), 
+					       retrieveFieldDesc(desc)));
+	}
+
+	public void visitIincInsn(int var, int increment) {
+	    instructions.add(new IincInsnNode(var, increment));
+	    if ( var+1 > maxLocals )
+		maxLocals = var+1;
+	}
+
+	public void visitInsn(int opcode) {
+	    if ( opcode >= org.objectweb.asm.Opcodes.IRETURN &&
+		 opcode <= org.objectweb.asm.Opcodes.RETURN &&
+		 md instanceof MethodDecl ) {
+		// may need to modify return code.
+		instructions.add(new InsnNode(((MethodDecl) md).type().returnOpcode()));
+	    } else
+		instructions.add(new InsnNode(opcode));
+	    changeMaxStack(opcode);
+	}
+
+	public void visitIntInsn(int opcode, int operand) {
+	    instructions.add(new IntInsnNode(opcode, operand));
+	    changeMaxStack(opcode);
+	}
+
+	public void visitJumpInsn(int opcode, Label label) {
+	    instructions.add(new JumpInsnNode(opcode, new LabelNode(label)));
+	    changeMaxStack(opcode);
+	}
+
+	public void visitLabel(Label label) {
+	    instructions.add(new LabelNode(label));
+	}
+
+	public void visitLdcInsn(Object cst) {
+	    instructions.add(new LdcInsnNode(cst));
+	    changeMaxStack(Bytecode.LDC);
+	}
+
+	public void visitLineNumber(int line, Label start) {
+	    instructions.add(new LineNumberNode(line, new LabelNode(start)));
+	}
+
+	public void visitLocalVariable(String name,String desc,String signature,Label start,Label end,int index) {
+	    // change local variable size.
+	    TypeDecl lt = retrieveTypeFromDesc(desc);
+	    if ( lt.isDouble() || lt.isLong())
+		maxLocals += 2;
+	    else maxLocals += 1;
+
+	    localVariables.add(new LocalVariableNode(retrieveName(name), 
+						     name.equals("this")? 
+						     parClass.expandedTypeDescriptor()
+						     : retrieveFieldDesc(desc), 
+						     null,//signature, 
+						     new LabelNode(start),
+						     new LabelNode(end), 
+						     index));
+	}
+	
+
+	public void visitLookupSwitchInsn(Label dflt, int[] keys, Label[] labels) {
+	    instructions.add(new LookupSwitchInsnNode(new LabelNode(dflt), keys, makeLabelArray(labels)));
+	}
+
+	public void visitMethodInsn(final int opcode,
+				    final String owner,
+				    final String name,
+				    final String desc) {
+	    // desc needs to be parsed and reconstructed.
+	    // change opcode: maybe invokevirtual, invokeinterface, or
+	    // invokestatic.
+	    // if it's INVOKESPECIAL, leave alone.  
+
+	    // TODO: remove the test so we can properly test the 
+	    // retrieving constructors from static methods --
+	    // needsExpansion isn't working correctly.
+	    int newOpcode = retrieveOpcode(owner, name, desc, opcode);
+	    instructions.add(new MethodInsnNode(newOpcode,
+						retrieveOwner(owner),
+						retrieveName(name), 
+						retrieveMethodDesc(desc)));
+
+	    /*
+	    switch ( opcode ) {
+	    case Bytecode.INVOKEINTERFACE:
+	    case Bytecode.INVOKESPECIAL:
+		break;
+	    case Bytecode.INVOKESTATIC:
+		int size = retrieveMethodReturnType(desc).variableSize();
+		java.util.List<TypeDecl> params = retrieveMethodParams(desc);
+		for ( int i=0; i<params.size(); i++) {
+		    size -= params.get(i).variableSize();
+		}
+		maxStack += size;
+	    }
+	    */
+	}
+
+	public void visitMultiANewArrayInsn(String desc, int dims) {
+	    instructions.add(new MultiANewArrayInsnNode(desc, dims));
+	}
+
+	public void visitTableSwitchInsn(int min, int max, Label dflt, Label[] labels) {
+	    instructions.add(new TableSwitchInsnNode(min, max, new LabelNode(dflt), makeLabelArray(labels)));
+	}
+
+	public void visitTypeInsn(int opcode, String type) {
+	    // parse type to see whether it needs to be replaced with
+	    // expanded type name.	    
+	    TypeDecl t = retrieveOwnerType(type);
+	    instructions.add(new TypeInsnNode(opcode, t.constantPoolName()));
+	    changeMaxStack(opcode);
+	}
+
+	public void visitVarInsn(int opcode, int var) {
+	    instructions.add(new VarInsnNode(opcode,var));
+	    changeMaxStack(opcode);
+	    changeMaxLocal(opcode, var);
+	}
+
+	public void visitTryCatchBlock(Label start, Label end, Label handler, String type) {
+	    tryCatchBlocks.add(new TryCatchBlockNode(new LabelNode(start), new LabelNode(end), new LabelNode(handler), type));
+	}
+
+
+	private LabelNode[] makeLabelArray(Label[] labels) {
+	    LabelNode[] nodes = new LabelNode[labels.length];
+	    for ( int i=0; i<labels.length; i++) {
+		nodes[i] = new LabelNode(labels[i]);
+	    }
+	    return nodes;
+	}
+
+    }
+
+    public int TypeDecl.returnOpcode() { 
+	throw new Error("No opcode defined for type " + getClass().getName());
+    }
+    public int VoidType.returnOpcode() { return org.objectweb.asm.Opcodes.RETURN; }
+    public int PrimitiveType.returnOpcode() { return org.objectweb.asm.Opcodes.IRETURN; }
+    public int LongType.returnOpcode() { return org.objectweb.asm.Opcodes.LRETURN; }
+    public int FloatType.returnOpcode() { return org.objectweb.asm.Opcodes.FRETURN; }
+    public int DoubleType.returnOpcode() { return org.objectweb.asm.Opcodes.DRETURN; }
+    public int ReferenceType.returnOpcode() { return org.objectweb.asm.Opcodes.ARETURN; }
+    public int NullType.returnOpcode() { return org.objectweb.asm.Opcodes.RETURN; }
+
+}
