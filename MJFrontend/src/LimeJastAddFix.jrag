@@ -1,0 +1,245 @@
+aspect LimeJastAddFix {
+
+    refine BoundNames public MethodDecl TypeDecl.addMemberMethod(MethodDecl m) {
+	BoundNames.TypeDecl.addMemberMethod(m);
+    
+	// update localMemberMethodSignatureMap
+	if ( localMethodsSignatureMap().get(m.signature()) == null )
+	    localMethodsSignatureMap().put(m.signature(), m);
+
+	// update methodsSignatureMap
+	if ( methodsSignatureMap().get(m.signature()) == null )
+	    methodsSignatureMap().put(m.signature(), m);
+	
+	// if method is reflectively declared, clear reflectiveMethods_computed.
+	if ( m instanceof StaticForMethodDecl )
+	    reflectiveMethods_computed = false;
+
+	return m;
+    }
+
+    refine BoundNames public FieldDeclaration TypeDecl.addMemberField(FieldDeclaration f) {
+	BoundNames.TypeDecl.addMemberField(f);
+
+	// update localFieldsMap
+	SimpleSet fields = (SimpleSet) localFieldsMap().get(f.name());
+	if ( fields == null ) fields = SimpleSet.emptySet;
+	// check fields doesn't already contain f. this should never happen
+	// TODO: make error?
+	boolean add = true;
+	for ( Iterator fIt = fields.iterator(); fIt.hasNext(); ) {
+	    if ( fIt.next() == f ) {
+		add = false;
+		break;
+	    }
+	}
+
+	if ( add ) {
+	    fields = fields.add(f);
+	    localFieldsMap().put(f.name(), fields);
+	}
+
+	// if method is reflectively declared, clear reflectiveMethods_computed.
+	if ( f instanceof StaticForFieldDeclaration )
+	    reflectiveFields_computed = false;
+
+	return f;
+	//if(!memberFields(f.name()).contains(f))
+	//  throw new Error("The field " + f.name() + " added to " + typeName() + " can not be found using lookupMemberField");
+    }
+
+    public MethodDecl GenericTypeDecl.addMemberMethod(MethodDecl m) {
+	super.addMemberMethod(m);
+
+	// clear parTypeDecl's localMethodSigantureMaps.
+	List parTypes = getParTypeDecls();
+	for ( int i=0; i<parTypes.getNumChild(); i++) {
+	    ParTypeDecl pt = (ParTypeDecl) parTypes.getChild(i);
+
+	    m.findSubstitutedMethodDecl((MemberSubstitutor) pt);
+	    //	    pt.addMemberMethod(m);
+	}
+
+	return m;
+    }
+
+    public FieldDeclaration GenericTypeDecl.addMemberField(FieldDeclaration f) {
+	super.addMemberField(f);
+
+	List parTypes = getParTypeDecls();
+	for ( int i=0; i<parTypes.getNumChild(); i++) {
+	    ParTypeDecl pt = (ParTypeDecl) parTypes.getChild(i);
+	    f.findSubstitutedFieldDeclaration((MemberSubstitutor) pt);
+	    //	    pt.addMemberField(f);
+	}
+	return f;
+    }
+
+    public List GenericTypeDecl.getParTypeDecls();
+    public MethodDecl ParTypeDecl.addMemberMethod(MethodDecl m) {
+	return super.addMemberMethod(m);
+    }
+    public FieldDeclaration ParTypeDecl.addMemberField(FieldDeclaration f) {
+	return super.addMemberField(f);
+    }
+
+    refine MethodSignature eq ConstructorDecl.applicableBySubtyping(List argList) {
+	int argIndex = 0;
+	for(int i = 0; i < getNumParameter(); i++) {
+	    // If we run out of arguments and still have parameters, this
+	    // constructor is not applicable.
+	    if ( argIndex >= argList.getNumChild())
+		return false;
+
+	    ParameterDeclaration pd = getParameter(i);
+	    if ( pd.isVariableArity()) {
+		// it must be an array type. get the elementType.
+		TypeDecl pType =((ArrayDecl) pd.type()).elementType();
+
+		// eat off as many arguments as possible.
+		// but there must be at least one.
+		if ( !((Expr) argList.getChild(argIndex++)).type().instanceOf(pType) )
+		    return false;
+
+		while ( argList.getNumChild() > argIndex  &&
+			((Expr) argList.getChild(argIndex)).type().instanceOf(pType)) {
+		    argIndex++;
+		}
+	    } else {
+		TypeDecl arg = ((Expr)argList.getChild(argIndex++)).type();
+		if(!arg.instanceOf(pd.type()))
+		    return false;
+	    }
+	}
+	return true;
+    }
+
+    refine MethodSignature eq MethodAccess.applicableBySubtyping(MethodDecl m) {
+	int argIndex = 0;
+	for(int i = 0; i < m.getNumParameter(); i++) {
+	    // If we run out of arguments and still have parameters, this
+	    // constructor is not applicable.
+	    if ( argIndex >= getNumArg())
+		return false;
+
+	    ParameterDeclaration pd = m.getParameter(i);
+	    if ( pd.isVariableArity()) {
+		// it must be an array type. get the elementType.
+		TypeDecl pType =((ArrayDecl) pd.type()).elementType();
+
+		// eat off as many arguments as possible.
+		// but there must be at least one.
+		if ( ! getArg(argIndex++).type().instanceOf(pType) )
+		    return false;
+
+		while ( getNumArg() > argIndex  &&
+			getArg(argIndex).type().instanceOf(pType)) {
+		    argIndex++;
+		}
+	    } else {
+		TypeDecl arg = getArg(argIndex++).type();
+		if(!arg.instanceOf(pd.type()))
+		    return false;
+	    }
+	}
+	return true;
+    }
+    refine ResolveAmbiguousNames public Dot Dot.qualifiesAccess(Access access ) {
+	Access right = getRightNoTransform();
+	Dot qma = right.qualifiesAccess(access);
+	Dot dot = new Dot(getLeftNoTransform(), qma);
+	dot.lastDot = qma.lastDot;
+	return dot;
+    }
+
+    /*
+    refine InnerClasses eq TypeDecl.enclosing() {
+	if(!needsEnclosing())
+	    return null;
+	TypeDecl typeDecl = enclosingType();
+	if(isAnonymous() && inExplicitConstructorInvocation() &&
+	   typeDecl.enclosingType() != null )
+	    typeDecl = typeDecl.enclosingType();
+	return typeDecl;	
+    }
+    */
+
+    /* Appears to be incorporated in the fix
+    refine GenericsSubtype eq TypeVariable.supertypeTypeVariable(TypeVariable type) {
+	if(type == this)
+	    return true;
+	for(int i = 0; i < getNumTypeBound(); i++) {
+	    boolean found = false;
+	    for(int j = 0; !found && j < type.getNumTypeBound(); j++) {
+		if(type.getTypeBound(j).type().subtype(getTypeBound(i).type()))
+		    found = true;
+	    }
+	    if(!found)
+		return false;
+	}
+	return true;
+    }
+    */
+
+    /*
+    refine GenericsCodegen eq GenericMethodDecl.methodTypeSignature() {
+	StringBuffer buf = new StringBuffer();
+	buf.append("<");
+	for(int i = 0; i < getNumTypeParameter(); i++)
+	    buf.append(getTypeParameter(i).formalTypeParameter());
+	buf.append(">");
+	buf.append(super.methodTypeSignature());
+	return buf.toString();
+    }
+    */
+
+    refine GenericTypeVariables public void TypeVariable.typeCheck() {
+	if(getTypeBound(0).type().isTypeVariable() && !getTypeBound(0).type().isParameterizedType()) {
+	    if(getNumTypeBound() > 1)
+		error("a type variable may not be followed by other bounds");
+	}
+	else {
+	    if(!getTypeBound(0).type().isClassDecl() && !getTypeBound(0).type().isInterfaceDecl()) {
+		error("the first type bound must be a class or interface type which " + 
+		      getTypeBound(0).type().fullName() + " is not");
+	    }
+	    for(int i = 1; i < getNumTypeBound(); i++) {
+		if(!getTypeBound(i).type().isInterfaceDecl()) {
+		    error("type bound " + i + " must be an interface type which " + 
+			  getTypeBound(i).type().fullName() + " is not");
+		}
+	    }
+	}
+	HashSet typeSet = new HashSet();
+	for(int i = 0; i < getNumTypeBound(); i++) {
+	    TypeDecl type = getTypeBound(i).type();
+	    TypeDecl erasure = type.erasure();
+	    if(typeSet.contains(erasure)) {
+		if(type != erasure) {
+		    error("the erasure " + erasure.fullName() + " of typebound " + getTypeBound(i) + " is multiply declared in " + this);
+		}
+		else {
+		    error(type.fullName() + " is multiply declared");
+		}
+	    }
+	    typeSet.add(erasure);
+	}
+	
+	for(int i = 0; i < getNumTypeBound(); i++) {
+	    TypeDecl type = getTypeBound(i).type();
+	    for(Iterator iter = type.methodsIterator(); iter.hasNext(); ) {
+		MethodDecl m = (MethodDecl)iter.next();
+		for(int j = i+1; j < getNumTypeBound(); j++) {
+		    TypeDecl destType = getTypeBound(j).type();
+		    for(Iterator destIter = destType.memberMethods(m.name()).iterator(); destIter.hasNext(); ) {
+			MethodDecl n = (MethodDecl)destIter.next();
+			if(m.sameSignature(n) && m.type() != n.type()) {
+			    error("the two bounds, " + type.name() + " and " + destType.name() + ", in type variable " + name() + 
+				  " have a method " + m.signature() + " with conflicting return types " + m.type().name() + " and " + n.type().name());
+			}
+		    }
+		}
+	    }
+	}
+    }
+}

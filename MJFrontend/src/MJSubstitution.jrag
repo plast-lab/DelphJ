@@ -1,0 +1,335 @@
+aspect MJSubstitution {
+
+    protected StaticForMethodDecl StaticForMethodDecl.original;
+    protected StaticForFieldDeclaration StaticForFieldDeclaration.original;
+
+    syn StaticForMethodDecl StaticForMethodDecl.original() = original != null ? original : this;
+
+    public int ParTypeDecl.getNumBodyDecl();
+    public BodyDecl ParTypeDecl.getBodyDecl(int i);
+
+    public StaticForMethodDeclSubstituted StaticForMethodDecl.substitute(Map substitutions) {
+	StaticForMethodDeclSubstituted m = 
+	    new StaticForMethodDeclSubstituted((Modifiers) getModifiers().fullCopy(),
+					       getTypeAccess().type().substitute(substitutions),
+					       substitutedName(substitutions),
+					       getParameterList().expandParameterList(substitutions),
+					       getExceptionList().expandAccessList(substitutions),
+					       new Opt(),
+					       getIteratorDecl().substitute(substitutions),
+					       new List(), new List());
+	m.original = this;
+	m.is$Final = true;
+	m.expansionSubstitutions.putAll(substitutions);
+
+	this.addStaticForMethodDeclSubstituted(m);
+	
+	m.identifier().namevariable = 
+	    identifier().substitutedNameVariable(substitutions);
+
+	return m;
+    }
+    
+    public StaticForFieldDeclarationSubstituted StaticForFieldDeclaration.substitute(Map substitutions) {
+	StaticForFieldDeclarationSubstituted f =
+	    new StaticForFieldDeclarationSubstituted((Modifiers) getModifiers().fullCopy(),
+						     getTypeAccess().type().substitute(substitutions),
+						     substitutedName(substitutions),
+						     new Opt(),
+						     getIteratorDecl().substitute(substitutions), new List());
+
+	f.original = this;
+	f.is$Final = true;
+	f.expansionSubstitutions.putAll( substitutions );
+
+	this.addStaticForFieldDeclarationSubstituted(f);
+
+	// The substituted name might again contain a name variable. 
+	// we need to maintain that in identifier().
+	f.identifier().namevariable = 
+	    identifier().substitutedNameVariable(substitutions);
+	    
+
+	return f;
+    }
+
+    Map SubstitutedStaticForStmt.substitutions = new HashMap();
+
+    // StaticForStmt can also be substituted with a unification mapping from
+    // either the enclosing static method being substituted with the mapping,
+    // or from a mapping resulted from unifying with another StaticForStmt.
+    public StaticForStmt StaticForStmt.substitute(Map substitutions) {
+	SubstitutedStaticForStmt p = new SubstitutedStaticForStmt(getIteratorDecl().substitute(substitutions), new List(), new List());
+	p.original = this;
+	p.is$Final = true;
+	p.substitutions.putAll(substitutions);
+
+	addSubstitutedStaticForStmt(p);
+	
+	return p;
+    }
+    public IteratorDecl IteratorDecl.substitute(Map substitutions) {
+	ParIteratorDecl pid = new ParIteratorDecl();
+	for ( int i=0; i<getNumPatternTypeParameter(); i++) {
+	    TypeVariable t = getPatternTypeParameter(i).fullCopy();
+	    pid.addPatternTypeParameter((PatternTypeVariable)t.substitute(substitutions).type());
+	}
+	pid.setPatternNameParameterList(getPatternNameParameterList().fullCopy());
+
+	// create the mapping to be used for pattern and nested pattern
+	// substitution.
+	HashMap map = new HashMap();
+	for ( int i=0; i<getNumPatternTypeParameter(); i++)
+	    map.put(getPatternTypeParameter(i), pid.getPatternTypeParameter(i));
+
+	for ( int i=0; i<getNumPatternNameParameter(); i++)
+	    map.put(getPatternNameParameter(i), new Identifier(pid.getPatternNameParameter(i).getID(),pid));
+							       
+	
+	pid.setPattern(getPattern().substitute(map).substitute(substitutions));
+
+	for ( int i=0; i<getNumNestedPattern(); i++)
+	    pid.addNestedPattern(getNestedPattern(i).substitute(map).substitute(substitutions));
+	
+	pid.original = this;
+	return pid;
+    }
+
+    public MethodDecl MethodDecl.substitute(Map substitutions) {
+	return (MethodDecl) fullCopy();
+    }
+    public Pattern Pattern.substitute(Map substitutions) {
+	throw new Error("substitute(Map) unsupported by " +
+			getClass().getName());
+    }
+
+    public EmptyPrimaryPattern EmptyPrimaryPattern.substitute(Map substitutions) {
+	return new EmptyPrimaryPattern(new BaseSet(new AllMatchingTypeVariable(new Modifiers(), "", new List(), new List()).createBoundAccess(), new RefElmt("methods")));
+    }
+
+    public String StaticFieldPattern.substitutedName(String name, Map substitutions) {
+	return name;
+    }
+    public String StaticMethodPattern.substitutedName(String name, Map substitutions) {
+	return name;
+    }
+    public String FieldDeclaration.substitutedName(Map substitutions) {
+	return identifier().substitutedName(substitutions);
+    }
+    public String MethodDecl.substitutedName(Map substitutions) {
+	return identifier().substitutedName(substitutions);
+    }
+
+    public Object PatternNameVariable.substitute(Map uniMap) {
+	if ( uniMap.containsKey(this) ) {
+	    if ( uniMap.get(this) instanceof String )
+		return uniMap.get(this);
+	    return ((PatternNameVariable) uniMap.get(this)).substitute(uniMap);
+	} 
+	return this;
+    }
+
+    public FieldPattern FieldPattern.substitute(Map substitutions) {
+	FieldPattern fp =
+	    new FieldPattern(getBaseSet().substitute(substitutions),
+			     (Modifiers) getModifiers().fullCopy(),
+			     getTypeAccess().type().substitute(substitutions),
+			     identifier().substitutedName(substitutions), // name, 
+			     new Opt(), new List());
+	
+	fp.is$Final = true;
+	fp.bypassErrorChecking = true;
+
+	this.addSubFieldPattern(fp);
+
+	fp.identifier().namevariable = 
+	    this.identifier().substitutedNameVariable(substitutions);
+
+	return fp;
+    }
+
+    public NestedFieldPattern NestedFieldPattern.substitute(Map substitutions) {
+	NestedFieldPattern nfp =
+	    new NestedFieldPattern(getBaseSet().substitute(substitutions),
+				   (Modifiers) getModifiers().fullCopy(),
+				   getTypeAccess().type().substitute(substitutions),
+				   identifier().substitutedName(substitutions), //name,
+				   new Opt(), new List(),
+				   getIsPositive(), getIsErrorCondition());	
+	nfp.is$Final = true;
+	nfp.bypassErrorChecking = true;
+
+	addSubFieldPattern(nfp);
+
+	nfp.identifier().namevariable = 
+	    this.identifier().substitutedNameVariable(substitutions);
+
+	return nfp;
+    }
+    public StaticFieldPattern StaticFieldPattern.substitute(Map substitutions) {
+	return this;
+    }
+    public StaticMethodPattern StaticMethodPattern.substitute(Map substitutions) {
+	return this;
+    }
+    public MethodPattern MethodPattern.substitute(Map substitutions) {
+	MethodPattern mp =
+	    new MethodPattern(getBaseSet().substitute(substitutions),
+			      (Modifiers) getModifiers().fullCopy(),
+			      getTypeAccess().type().substitute(substitutions),
+			      identifier().substitutedName(substitutions), //name,
+			      getParameterList().substituteAccessList(substitutions),
+			      getExceptionList().substituteAccessList(substitutions),
+			      new Opt(), new List());
+	
+	mp.is$Final = true;
+	mp.bypassErrorChecking = true;
+
+	addSubMethodPattern(mp);
+
+	mp.identifier().namevariable = 
+	    this.identifier().substitutedNameVariable(substitutions);
+
+	return mp;
+    }
+
+    public NestedMethodPattern NestedMethodPattern.substitute(Map substitutions) {
+	NestedMethodPattern nmp = 
+	    new NestedMethodPattern(getBaseSet().substitute(substitutions),
+				    (Modifiers) getModifiers().fullCopy(),
+				    getTypeAccess().type().substitute(substitutions),
+				    identifier().substitutedName(substitutions), //name,
+				    getParameterList().substituteAccessList(substitutions),
+				    getExceptionList().substituteAccessList(substitutions),
+				    new Opt(), new List(),
+				    getIsPositive(), getIsErrorCondition());	
+	nmp.is$Final = true;
+	nmp.bypassErrorChecking = true;
+	
+	addSubMethodPattern(nmp);
+
+	nmp.identifier().namevariable = 
+	    this.identifier().substitutedNameVariable(substitutions);
+
+	return nmp;
+    }
+    public TrueNestedPattern TrueNestedPattern.substitute(Map substitutions) {
+	TrueNestedPattern p = new TrueNestedPattern();
+	p.bypassErrorChecking = true;
+	return p;
+    }
+
+    public BaseSet BaseSet.substitute(Map substitutions) {
+	return new BaseSet(getTypeAccess().type().substitute(substitutions), getRefElmt());
+    }
+    
+    public java.util.List MethodPattern.substitutedParameterTypes(Map submap) {
+	//	List list = getParameterList().expandAccessList(submap);
+	List list = getParameterList().substituteAccessList(submap);
+	// extract types.
+	java.util.List paramTypes = new ArrayList();
+	for ( int i=0; i<list.getNumChild(); i++)
+	    paramTypes.add(((Access) list.getChild(i)).type());
+	return paramTypes;
+    }
+
+    public List List.expandParameterList(Map submap) {
+	List list = new List();
+	for ( int i=0; i<getNumChild(); i++) {
+	    ParameterDeclaration node = (ParameterDeclaration) getChild(i);
+	    TypeDecl argType = node.getTypeAccess().type();
+
+	    // call substitution first.
+	    Access argAccess = argType.substitute(submap);
+	    TypeDecl subArgType = argAccess.type();
+
+	    if ( subArgType.isVectorTypeVariable()) {
+		List argTypes = subArgType.expandAccessList(submap);
+		for ( int j=0; j<argTypes.getNumChild(); j++) {
+		    ParameterDeclaration newNode = 
+			new ParameterDeclaration((Modifiers) node.getModifiers().fullCopy(),
+						 (Access) argTypes.getChild(j),
+						 node.getID() + j);
+		    list.add(newNode);
+		}
+	    } else {
+		ParameterDeclaration newNode = 
+		    new ParameterDeclaration((Modifiers) node.getModifiers().fullCopy(),
+					     argAccess,
+					     node.getID());
+		list.add(newNode);
+	    }
+	}
+	return list;
+    }
+
+    public List List.substituteAccessList(Map substitutions) {
+	List list = new List();
+	for ( int i=0; i<getNumChild(); i++) {
+	    Access node = (Access) getChild(i);
+	    List vlist = node.type().substituteToList(substitutions);
+	    for ( int j=0; j<vlist.getNumChild(); j++)
+		list.add(vlist.getChild(j));
+	    
+	    //		list.add(node.type().substitute(substitutions));
+	}
+	return list;
+    }
+
+    public Access TypeDecl.substitute(Map submap) {
+	return createBoundAccess();
+    }
+    public Access TypeVariable.substitute(Map submap) {
+	if ( submap.containsKey(this))
+	    return ((TypeDecl) submap.get(this)).substitute(submap);
+	return createBoundAccess();
+    }
+    public Access ParTypeDecl.substitute(Map submap) {
+	java.util.ArrayList list = new java.util.ArrayList();
+	for ( int i=0; i<getNumArgument(); i++) 
+	    list.add(getArgument(i).type().substitute(submap).type());
+	return ((GenericTypeDecl) genericDecl()).lookupParTypeDecl(list).createBoundAccess();
+    }
+    
+    public Access RawClassDecl.substitute(Map submap) { return createBoundAccess(); }
+    public Access RawInterfaceDecl.substitute(Map submap) { return createBoundAccess(); }
+
+    public List TypeDecl.substituteToList(Map submap) {
+	return new List().add(substitute(submap));
+    }
+    public List VectorTypeVariable.substituteToList(Map submap) {
+	List vlist = expandAccessList(submap);
+	if ( vlist.getNumChild() == 0 && !isMapped(submap)) 
+	    vlist.add(substitute(submap));
+	return vlist;
+    }
+
+    public List List.expandAccessList(Map submap) {
+	List list = new List();
+	for ( int i=0; i<getNumChild(); i++) {
+	    Access node = (Access) getChild(i);
+	    List subs = node.type().expandAccessList(submap);
+	    for ( int j=0; j<subs.getNumChild(); j++)
+		list.add(subs.getChild(j));
+	}
+	return list;
+    }
+    syn lazy List TypeDecl.expandAccessList(Map submap ) {
+	return new List().add(substitute(submap));
+    }
+    eq VectorTypeVariable.expandAccessList(Map submap) {
+	List subed = new List();
+
+	// check whether there is a map for this type in submap.
+	if ( submap.containsKey(this))
+	    return ((TypeDecl) submap.get(this)).expandAccessList(submap);
+
+	for ( int i=0; i<getNumMatchedVectorTypeVariable(); i++) {
+	    MatchedVectorTypeVariable t = getMatchedVectorTypeVariable(i);
+	    if ( submap.containsKey(t) && submap.get(t) != null )
+		subed.add(((TypeDecl) submap.get(t)).substitute(submap));
+	}
+
+	return subed;
+    }
+}

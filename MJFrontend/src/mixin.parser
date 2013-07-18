@@ -1,0 +1,13 @@
+TypeVariable type_parameter =
+    INTERFACE IDENTIFIER.v              {:  return new ConstrainedTypeVariable(new Modifiers(), v, new List(), new List(), "interface");  :}
+  | INTERFACE IDENTIFIER.v type_bound.l {:  return new ConstrainedTypeVariable(new Modifiers(), v, new List(), l, "interface"); :}
+  | CLASS IDENTIFIER.v              {:  return new ConstrainedTypeVariable(new Modifiers(), v, new List(), new List(), "class");  :}
+  | CLASS IDENTIFIER.v type_bound.l {:  return new ConstrainedTypeVariable(new Modifiers(), v, new List(), l, "class"); :}
+  ;
+
+TypeVariable type_parameter_1 =
+    INTERFACE IDENTIFIER.v GT             {:  return new ConstrainedTypeVariable(new Modifiers(), v, new List(), new List(), "interface");  :}
+  | INTERFACE IDENTIFIER.v type_bound_1.l {:  return new ConstrainedTypeVariable(new Modifiers(), v, new List(), l, "interface");  :}
+  | CLASS IDENTIFIER.v GT             {:  return new ConstrainedTypeVariable(new Modifiers(), v, new List(), new List(), "class");  :}
+  | CLASS IDENTIFIER.v type_bound_1.l {:  return new ConstrainedTypeVariable(new Modifiers(), v, new List(), l, "class");  :}
+  ;	

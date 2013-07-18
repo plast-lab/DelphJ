@@ -1,0 +1,8 @@
+aspect Attributes {
+
+    //    inh CompilationUnit TypeDecl.compilationUnit();
+    eq CompilationUnit.getTypeDecl(int i).compilationUnit() = this;
+    eq CompilationUnit.getImportDecl(int i).compilationUnit() = this;
+
+
+}

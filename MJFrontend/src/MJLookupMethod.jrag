@@ -1,0 +1,764 @@
+aspect MJLookupMethod {
+
+    /**
+     * Attribute indicating wether a MethodDecl is a compiler-generated
+     * StaticFor method that covers every method of a particular TypeDecl,
+     * copying the entire signature.
+     **/
+    syn lazy boolean MethodDecl.isEveryMethod() = false;
+    eq EveryMethodDecl.isEveryMethod() = true;
+    eq StaticForMethodDeclSubstituted.isEveryMethod() = 
+	((StaticForMethodDecl) getOriginal()).isEveryMethod();
+    
+    /**
+     * JastAddJ uses a method signature map to store mappings from 
+     * String (method signature) to MethodDecl.  This no longer works
+     * for reflectively declared methods. We will keep the statically
+     * declared methods the way they are. And use another data structure
+     * for reflectively declared methods.
+     **/
+
+    syn lazy Collection<StaticForMethodDecl> TypeDecl.reflectiveMethods() {
+	Set set = new HashSet();
+	for ( int i=0; i<getNumBodyDecl(); i++) {
+	    if ( getBodyDecl(i).isReflectiveDecl()  &&
+		 getBodyDecl(i) instanceof MethodDecl )
+		set.add((StaticForMethodDecl)getBodyDecl(i));
+	}
+	return set;
+    }
+    eq ClassDecl.reflectiveMethods() {
+	Collection<StaticForMethodDecl> methods = super.reflectiveMethods();
+	if ( hasSuperclass())
+	    methods.addAll(superclass().reflectiveMethods());
+	// interfaces.
+	for ( Iterator ifIt = interfacesIterator(); ifIt.hasNext(); ) {
+	    methods.addAll(((TypeDecl) ifIt.next()).reflectiveMethods());
+	}
+	return methods;
+    }
+
+    eq TypeVariable.reflectiveMethods() {
+	Set set = new HashSet();
+	for ( int i=0; i<getNumTypeBound(); i++) {
+	    set.addAll(getTypeBound(i).type().reflectiveMethods());
+	}
+	return set;
+    }
+    eq ParTypeDecl.reflectiveMethods() {
+	Collection<StaticForMethodDecl> refMethods = 
+	    genericDecl().reflectiveMethods();
+	Set<StaticForMethodDecl> substitutedMethods = new HashSet();
+	for ( Iterator<StaticForMethodDecl> rmIt = refMethods.iterator(); rmIt.hasNext(); ) {
+	    StaticForMethodDecl md = rmIt.next();
+	    //	    if ( md.usesTypeVariable()) {
+	    BodyDecl bd = md.findSubstitutedMethodDecl(this);
+	    /*
+		BodyDecl bd = md.p(this);
+		bd.is$Final = true;
+		addBodyDecl((StaticForMethodDecl)bd);
+	    */
+		substitutedMethods.add((StaticForMethodDecl)bd);
+		/*
+	    } else 
+		substitutedMethods.add((StaticForMethodDecl)md);
+		*/
+	}
+	return substitutedMethods;
+    }
+
+    refine LookupMethod eq ClassDecl.interfacesMethodsSignatureMap() {
+	HashMap map = new HashMap();
+	for(Iterator iter = interfacesIterator(); iter.hasNext(); ) {
+	    TypeDecl typeDecl = (TypeDecl)iter.next();
+	    for(Iterator i2 = typeDecl.methodsIterator(); i2.hasNext(); ) {
+		MethodDecl m = (MethodDecl)i2.next();
+		putSimpleSetElement(map, m.signature(), m);
+	    }
+	}
+	return map;
+    }
+
+    refine LookupMethod eq TypeDecl.localMethodsSignatureMap() {
+	HashMap map = new HashMap(getNumBodyDecl());
+	for(int i = 0; i < getNumBodyDecl(); i++) {
+	    if(getBodyDecl(i) instanceof MethodDecl) {
+		if ( getBodyDecl(i) instanceof StaticForMethodDecl) {
+		    StaticForMethodDecl decl = (StaticForMethodDecl) getBodyDecl(i);
+		    if (decl.expandable()) {
+			List<? extends MethodDecl> expandedMethods = decl.expandedMethods();
+			for ( int j=0; j<expandedMethods.getNumChild(); j++) {
+			    map.put(expandedMethods.getChild(j).signature(),
+				    expandedMethods.getChild(j));
+			}
+		    }
+		} else {
+		    MethodDecl decl = (MethodDecl)getBodyDecl(i);
+		    map.put(decl.signature(), decl);
+		}
+	    }
+	}
+	return map;
+    }
+
+    //    refine Generics eq ParTypeDecl.localMethodsSignatureMap() {    
+    // HashMap map = Generics.ParTypeDecl.localMethodsSignatureMap();
+    refine Generics eq MemberSubstitutor.localMethodsSignatureMap() {
+	HashMap map = Generics.MemberSubstitutor.localMethodsSignatureMap();
+	// add the ones from grounded reflective declarations.
+	Collection refMethods = reflectiveMethods();
+	for ( Iterator refIt = refMethods.iterator(); refIt.hasNext(); ) {
+	    StaticForMethodDeclSubstituted md = (StaticForMethodDeclSubstituted) refIt.next();
+	    if ( md.expandable() ) {
+		List expandedMethods = md.expandedMethods();
+		for ( int i=0; i<expandedMethods.getNumChild(); i++ ) {
+		    MethodDecl decl = (MethodDecl) expandedMethods.getChild(i);
+		    map.put(decl.signature(), decl);
+		}
+	    }
+	}
+	return map;
+    }
+
+    // Modified from LookupMethod.jrag
+    // Define method lookup by MJIdentifier.
+    inh Collection Expr.lookupMethod(Identifier id);
+    inh Collection Stmt.lookupMethod(Identifier id);
+    inh Collection BodyDecl.lookupMethod(Identifier id);
+    inh lazy Collection TypeDecl.lookupMethod(Identifier id);
+
+    eq MethodAccess.getArg().lookupMethod(Identifier id) = unqualifiedScope().lookupMethod(id);
+    eq ConstructorAccess.getArg().lookupMethod(Identifier id) = unqualifiedScope().lookupMethod(id);
+    eq ArrayAccess.getExpr().lookupMethod(Identifier id) = unqualifiedScope().lookupMethod(id);
+    eq ArrayTypeWithSizeAccess.getExpr().lookupMethod(Identifier id) = unqualifiedScope().lookupMethod(id);
+    
+    eq Program.getChild().lookupMethod(Identifier id) = Collections.EMPTY_LIST;
+    eq TypeDecl.getBodyDecl(int i).lookupMethod(Identifier id) = unqualifiedLookupMethod(id);
+
+    syn lazy Collection TypeDecl.unqualifiedLookupMethod(Identifier id) {
+	Collection c = memberMethods(id);
+	if(!c.isEmpty()) return c;
+	if(isInnerType())
+	    return lookupMethod(id);
+	return removeInstanceMethods(lookupMethod(id));
+    }    
+
+    // in explicit constructor invocation
+    eq ConstructorDecl.getConstructorInvocation().lookupMethod(Identifier id) {
+	Collection c = new ArrayList();
+	for(Iterator iter = lookupMethod(id).iterator(); iter.hasNext(); ) {
+	    MethodDecl m = (MethodDecl)iter.next();
+	    if(!hostType().memberMethods(id).contains(m) || m.isStatic())
+		c.add(m);
+	}
+	return c;
+    }
+    
+    // Modify how methods are retrieved.
+    refine LookupMethod eq AbstractDot.getRight().lookupMethod(String name) {
+	if ( enclosingRefIterator() != null ) {
+	    //if ( isNameVariable(name) || containsNameVariable(name)) {
+	    return getLeft().type().memberMethods(new Identifier(name, enclosingRefIterator()));
+	} else {
+	    return getLeft().type().memberMethods(new Identifier(name, IteratorDecl.TrueIteratorDecl));
+	}
+	/*
+	if ( isNameVariable(name) || containsNameVariable(name) )
+	    return getLeft().type().unqualifiedLookupMethod(new Identifier(name, this.enclosingRefIterator()));
+	return LookupMethod.AbstractDot.getRight().lookupMethod(name);
+	*/
+    }
+
+    syn lazy boolean Pattern.identifiedBy(PatternNameVariable name) = false;
+    eq MethodPattern.identifiedBy(PatternNameVariable name) = name.getID().equals(getID());
+    eq FieldPattern.identifiedBy(PatternNameVariable name) = name.getID().equals(getID());
+	
+    syn lazy boolean Pattern.identifiedBy(Identifier name) = false;
+    eq MethodPattern.identifiedBy(Identifier name) = name.toString().equals(getID());
+    eq FieldPattern.identifiedBy(Identifier name) = name.toString().equals(getID());
+    
+    syn Collection<StaticForMethodDecl> TypeDecl.reflectivelyDeclaredMethods(MethodDecl m) {
+	Collection<StaticForMethodDecl> results = new HashSet<StaticForMethodDecl>();
+	Collection<StaticForMethodDecl> refMethods = reflectiveMethods();
+	for ( Iterator<StaticForMethodDecl> refIt = refMethods.iterator(); refIt.hasNext(); ) {
+	    StaticForMethodDecl md = refIt.next();
+	    if ( md.expandable()) continue;
+
+	    HashMap uniMap = new HashMap();
+	    if ( m.canUnifySignature(md, uniMap, md.getIteratorDecl().patternTypeVariables(), md.getIteratorDecl().patternNameVariables()) &&
+		 m.type().unifiesWith(md.type(), uniMap, md.getIteratorDecl().patternTypeVariables())) {
+		results.add(md);
+	    }
+	}
+	return results;
+    }
+
+    syn HashMap TypeDecl.memberMethodsAndMap(Identifier name) {
+	HashMap map = new HashMap();
+	Collection methods = memberMethods(name);
+	for ( Iterator mIt = methods.iterator(); mIt.hasNext(); )
+	    map.put(mIt.next(), new HashMap());
+	return map;
+    }
+    /*
+    eq ClassDecl.memberMethodsAndMap(Identifier name) {
+	HashMap methods = new HashMap();
+	
+	Collection<StaticForMethodDecl> refMethods = reflectiveMethods();
+	for ( Iterator<StaticForMethodDecl> refIt = refMethods.iterator(); refIt.hasNext(); ) {
+	    StaticForMethodDecl md = refIt.next();
+
+	    // name could be a member method of this if
+	    // 1. its' enclosing iterator decl is subsumed by one of this's
+	    // method's iterator decl.
+	    HashMap uniMap = new HashMap();
+	    if ( md.getIteratorDecl().subsumes(name.enclosingRefIterator(), uniMap)) {
+		// 2. the name it maps to is used in declaring method.
+		//		if ( md.substitute(uniMap).getID().equals(name.substitutedName()))
+		if ( md.substitute(uniMap).identifier().equals(name)) {
+		    methods.put(md, uniMap);
+		}
+	    }
+	}
+	return methods;
+    }
+    */    
+
+    syn Collection TypeDecl.memberMethods(Identifier id) { 
+	Collection methods = new ArrayList();
+
+	IteratorDecl idecl = id.enclosingRefIterator();
+	if ( idecl.reflectiveBaseType() == this  &&
+	     idecl.getPattern().isMethodPattern() &&
+	     idecl.getPattern().identifiedBy(id) )
+	    // If the name is exactly what is used to match on the outermost
+	    // reflective loop, then the method designated by the name is
+	    // exactly what is specified by the pattern.
+	    methods.add(idecl.getPattern().patternMethodDecl());
+	else {
+	    for ( int i=0; i<idecl.getNumNestedPattern(); i++) {
+		// otherwise, if :
+		// 1. type is reflective base type for a nested pattern, AND
+		// 2. nested pattern is positieve AND
+		// 3. pattern is a method pattern AND
+		// 4. name is the name variable used in the nested pattern, AND
+		// 5. the nested pattern has a range of exactly one.
+		// then again the method is what's specified by the nested pattern.
+		Pattern np = idecl.getNestedPattern(i);
+		if ( np instanceof TrueNestedPattern ) continue;
+		if ( (  np.isPositive() && !np.isErrorCondition()   
+			|| !np.isPositive() && np.isErrorCondition() )
+		     && np.getBaseSet().type() == this &&
+		     np.isMethodPattern() && np.identifiedBy(id) &&
+		     np.exactlyRangeOfOne()) {
+		    methods.add(np.patternMethodDecl());
+		}
+	    }
+
+	    Collection<StaticForMethodDecl> refMethods = reflectiveMethods();
+	    // if there are no reflectively declared methods, check everyMethod.
+	    if ( !refMethods.iterator().hasNext()) {
+		StaticForMethodDecl em = (StaticForMethodDecl) everyMethod();
+
+		// id could be a member method of this if
+		// 1. its' enclosing iterator decl is subsumed by one of this's
+		// method's iterator decl.
+		HashMap uniMap = new HashMap();
+		if ( em.getIteratorDecl().subsumes(id.enclosingRefIterator(), uniMap)) {
+		    // 2. the name it maps to is used in declaring method.
+		    if ( em.substitute(uniMap).identifier().equals(id)) {
+			StaticForMethodDeclSubstituted smd = em.substitute(uniMap);
+			methods.add(smd);
+		    }
+		}
+	    }
+	    for ( Iterator<StaticForMethodDecl> refIt = refMethods.iterator(); refIt.hasNext(); ) {
+		StaticForMethodDecl md = refIt.next();
+		
+		// id could be a member method of this if
+		// 1. its' enclosing iterator decl is subsumed by one of this's
+		// method's iterator decl.
+		HashMap uniMap = new HashMap();
+		if ( md.getIteratorDecl().subsumes(id.enclosingRefIterator(), uniMap)) {
+		    // 2. the name it maps to is used in declaring method.
+		    if ( md.substitute(uniMap).identifier().equals(id)) {
+			StaticForMethodDeclSubstituted smd = md.substitute(uniMap);
+			methods.add(smd);
+		    }
+		}
+	    }
+	}
+
+	if ( !id.isNameVariable()) {
+	    methods.addAll(memberMethods(id.varname));
+	}
+
+	return methods;
+    }
+    eq TypeVariable.memberMethods(Identifier id) {
+	Collection methods = new ArrayList();
+
+	IteratorDecl idecl = id.enclosingRefIterator();
+	if ( idecl.reflectiveBaseType() == this &&
+	     idecl.getPattern().isMethodPattern() &&
+	     idecl.getPattern().identifiedBy(id) )
+	    // If the name is exactly what is used to match on the outermost
+	    // reflective loop, then the method designated by the name is
+	    // exactly what is specified by the pattern.
+	    methods.add(idecl.getPattern().patternMethodDecl());
+	else {
+	    for ( int i=0; i<idecl.getNumNestedPattern(); i++) {
+		// otherwise, if :
+		// 1. type is reflective base type for a nested pattern, AND
+		// 2. nested pattern is positieve AND
+		// 3. pattern is a method pattern AND
+		// 4. name is the name variable used in the nested pattern, AND
+		// 5. the nested pattern has a range of exactly one.
+		// then again the method is what's specified by the nested pattern.
+		Pattern np = idecl.getNestedPattern(i);
+		if ( np instanceof TrueNestedPattern ) continue;
+		if ( np.isPositive() && np.getBaseSet().type() == this &&
+		     np.isMethodPattern() && np.identifiedBy(id) &&
+		     np.exactlyRangeOfOne()) {
+		    methods.add(np.patternMethodDecl());
+		}
+	    }
+	} 
+	// look into bounds.
+	for ( int i=0; i<getNumTypeBound(); i++) {
+	    methods.addAll(getTypeBound(i).type().memberMethods(id));
+	}
+	return methods;
+    }
+
+    /**
+     * Return all methods in a type, regardless of accessibility.
+     * This is used purely for expansion.
+     **/
+    syn lazy HashMap TypeDecl.unrestrictedMethodsSignatureMap() 
+	= localMethodsSignatureMap();
+    
+    eq ClassDecl.unrestrictedMethodsSignatureMap() {
+	HashMap map = new HashMap(localMethodsSignatureMap());
+
+	// first collect all non-reflectively declared methods.
+	if ( hasSuperclass()) {
+	    for(Iterator iter = superclass().methodsIterator(); iter.hasNext(); ) {
+		MethodDecl m = (MethodDecl)iter.next();
+		if(!localMethodsSignatureMap().containsKey(m.signature()))
+		    putSimpleSetElement(map, m.signature(), m);
+	    }
+	}
+	for(Iterator outerIter = interfacesIterator(); outerIter.hasNext(); ) {
+	    TypeDecl typeDecl = (TypeDecl)outerIter.next();
+	    for(Iterator iter = typeDecl.methodsIterator(); iter.hasNext(); ) {
+		MethodDecl m = (MethodDecl)iter.next();
+		if(!localMethodsSignatureMap().containsKey(m.signature()))
+		    //		    if(allMethodsAbstract((SimpleSet)map.get(m.signature())))
+		    putSimpleSetElement(map, m.signature(), m);
+	    }
+	}
+
+	// get all the reflective methods, expanded.
+	Collection refMethods = reflectiveMethods();
+	for (Iterator refIt = refMethods.iterator(); refIt.hasNext(); ) {
+	    StaticForMethodDecl m = (StaticForMethodDecl) refIt.next();
+	    List expandedMethods = m.expandedMethods();
+	    for ( int i=0; i<expandedMethods.getNumChild(); i++) {
+		MethodDecl md = (MethodDecl) expandedMethods.getChild(i);
+		if ( !map.containsKey(md.signature()))
+		    putSimpleSetElement(map, md.signature(), md);
+	    }
+	}
+	return map;
+    }
+
+    eq InterfaceDecl.unrestrictedMethodsSignatureMap() {
+	HashMap map = new HashMap(localMethodsSignatureMap());
+	for(Iterator outerIter = superinterfacesIterator(); outerIter.hasNext(); ) {
+	    TypeDecl typeDecl = (TypeDecl)outerIter.next();
+	    for(Iterator iter = typeDecl.methodsIterator(); iter.hasNext(); ) {
+		MethodDecl m = (MethodDecl)iter.next();
+		if(!localMethodsSignatureMap().containsKey(m.signature()))
+		    putSimpleSetElement(map, m.signature(), m);
+	    }
+	}
+	for(Iterator iter = typeObject().methodsIterator(); iter.hasNext(); ) {
+	    MethodDecl m = (MethodDecl)iter.next();
+	    if(!map.containsKey(m.signature()))
+		putSimpleSetElement(map, m.signature(), m);
+	}	
+	// get all the reflective methods, expanded.
+	Collection refMethods = reflectiveMethods();
+	for (Iterator refIt = refMethods.iterator(); refIt.hasNext(); ) {
+	    StaticForMethodDecl m = (StaticForMethodDecl) refIt.next();
+	    List expandedMethods = m.expandedMethods();
+	    for ( int i=0; i<expandedMethods.getNumChild(); i++) {
+		MethodDecl md = (MethodDecl) expandedMethods.getChild(i);
+		if ( !map.containsKey(md.signature()))
+		    putSimpleSetElement(map, md.signature(), md);
+	    }
+	}
+	return map;
+    }
+
+    syn Collection TypeDecl.unrestrictedMemberMethods(String name) {
+	// retrieves from all nonreflectively declared methods.
+	// do not apply the same restrictions as memberMethods(name)
+	// such as access restriction.
+	Collection c = (Collection)unrestrictedMethodsNameMap().get(name);
+	if(c != null) return c;
+	return Collections.EMPTY_LIST;	
+    }
+    syn lazy HashMap TypeDecl.unrestrictedMethodsNameMap () {
+	HashMap map = new HashMap();
+	for(Iterator iter =unrestrictedMethodsIterator(); iter.hasNext(); ) {
+	    MethodDecl m = (MethodDecl)iter.next();
+	    ArrayList list = (ArrayList)map.get(m.name());
+	    if(list == null) {
+		list = new ArrayList(4);
+		map.put(m.name(), list);
+	    }
+	    list.add(m);
+	}
+	return map;
+    }
+
+    // iterate over all member methods in this type
+    public Iterator TypeDecl.unrestrictedMethodsIterator() {
+	return new Iterator() {
+		private Iterator outer = unrestrictedMethodsSignatureMap().values().iterator();
+		private Iterator inner = null;
+		public boolean hasNext() {
+		    if((inner == null || !inner.hasNext()) && outer.hasNext())
+			inner = ((SimpleSet)outer.next()).iterator();
+		    return inner != null ? inner.hasNext() : false;
+		}
+		public Object next() {
+		    return inner.next();
+		}
+		public void remove() { throw new UnsupportedOperationException(); }
+	    };
+    }
+    
+    syn lazy List<? extends MethodDecl> MethodDecl.expandedMethods () = new List().add(this);
+    eq StaticForMethodDecl.expandedMethods() = new List<MethodDecl>();
+    eq StaticForMethodDeclSubstituted.expandedMethods() {
+	ParTypeDecl ht = (ParTypeDecl) hostType();
+	GenericTypeDecl gtd = (GenericTypeDecl) ht.genericDecl();
+	    
+	IteratorDecl id = getIteratorDecl();
+	if ( !id.expandable()) {
+	    return new List<MethodDecl>();
+	}
+
+	// get the mappings for each element in the iterator decl's range. 
+	for ( Iterator subMaps = id.reflectiveElmts().values().iterator();
+	      subMaps.hasNext(); ) {
+	    Map substitutions = (Map) subMaps.next();
+
+	    // put into the map the parameterization from this
+	    for ( int i=0; i<gtd.getNumTypeParameter(); i++) {
+		substitutions.put(gtd.getTypeParameter(i),
+				  ht.getArgument(i).type());
+	    }
+
+	    StaticForMethodDeclSubstituted md = substitute(substitutions);
+	    //	    md.expansionSubstitutions = substitutions;
+	    // md.is$Final = true;
+	    // addExpandedMethodDecl(md);
+	}
+
+	//	return getExpandedMethodDeclList();
+	return getStaticForMethodDeclSubstitutedList();
+    }
+
+    // A map from elements in the reflective range to the mappings 
+    // resulting from the pattern variables to the concrete values in
+    // the element.
+    syn lazy Map IteratorDecl.reflectiveElmts() {
+	// in order to call this, base type must be fully grounded.
+	//	if ( !getPattern().getBaseSet().getTypeAccess().type().grounded())
+	if (!expandable())
+	    // this should never happen.
+	    throw new Error("Cannot return the reflective elements of a " +
+			    "reflective iterator when the base type is " +
+			    "not grounded");
+
+	// if this is ParIteratorDecl, we need to put in map
+	// original pattern type variable --> parameterized pattern
+	// type variables.
+	Map ptMap = new HashMap();
+	if ( this instanceof ParIteratorDecl ) {
+	    for ( int i=0; i<getNumPatternTypeParameter(); i++)
+		ptMap.put(((ParIteratorDecl) this).original.getPatternTypeParameter(i),
+			  getPatternTypeParameter(i));
+	    for ( int i=0; i<getNumPatternNameParameter(); i++)
+		ptMap.put(((ParIteratorDecl) this).original.getPatternNameParameter(i),
+			  getPatternNameParameter(i));
+	}
+	
+	Map refElmtsMap = new HashMap();
+	if ( getPattern() instanceof EmptyPrimaryPattern ) {
+	    // check whether nested patterns have error conditions.
+	    boolean npSat = true;
+	    for ( int i=0; i<getNumNestedPattern(); i++) {
+		Pattern np = getNestedPattern(i);
+		if ( !np.satisfiedBy(refElmtsMap)) 
+		    npSat = false;
+	    }
+	    if ( npSat ) 
+		// TODO: what's this again?
+		refElmtsMap.put(getPattern(), new HashMap(ptMap));
+	} else if ( getPattern().getBaseSet().iterateMethods()) {
+	    Map methods = getPattern().getBaseSet().type().unrestrictedMethodsSignatureMap();
+	    // find all methods that fall into the range of this
+	    // iterator decl.
+	    // Note: methods declared by Object are excluded.
+	    for ( Iterator mIt = methods.values().iterator(); 
+		  mIt.hasNext(); ) {
+		MethodDecl md = (MethodDecl) mIt.next();
+		if ( md.hostType() == md.hostType().typeObject()) continue;
+
+		HashMap map = new HashMap();
+		if ( md.isSubsumedBy(this, map)) {
+		    map.putAll(ptMap);
+		    refElmtsMap.put(md, map);
+		}
+	    }
+	} else {
+	    // iterate over fields.
+	    SimpleSet fields = getPattern().getBaseSet().type().unrestrictedFields();
+	    for ( Iterator fIt = fields.iterator(); fIt.hasNext(); ) {
+		FieldDeclaration fd = (FieldDeclaration) fIt.next();
+		if ( fd.hostType() == fd.hostType().typeObject()) continue;
+
+		HashMap map = new HashMap();
+		if ( fd.isSubsumedBy(this, map)) {
+		    map.putAll(ptMap);
+		    refElmtsMap.put(fd, map);
+		}
+	    }
+	}
+
+	return refElmtsMap;
+    }
+
+    public MethodDecl MethodDecl.findSubstitutedMethodDecl(MemberSubstitutor t) {
+	for ( int i=0; i<t.getNumBodyDecl(); i++) {
+	    if ( t.getBodyDecl(i) instanceof MethodDeclSubstituted ) {
+		MethodDeclSubstituted sfd = 
+		    (MethodDeclSubstituted) t.getBodyDecl(i);
+		if ( sfd.getOriginal() == this )
+		    return sfd;
+	    }
+	}
+	
+	// not found. make one.
+	MethodDecl sfd = (MethodDecl) this.p(t);
+	sfd.is$Final = true;
+	t.addBodyDecl(sfd);
+	
+	return sfd;
+    }
+    public StaticForMethodDecl StaticForMethodDecl.findSubstitutedMethodDecl(MemberSubstitutor t) {
+	for ( int i=0; i<t.getNumBodyDecl(); i++) {
+	    if ( t.getBodyDecl(i) instanceof StaticForMethodDeclSubstituted ) {
+		StaticForMethodDeclSubstituted sfd = 
+		    (StaticForMethodDeclSubstituted) t.getBodyDecl(i);
+		if ( sfd.getOriginal() == this )
+		    return sfd;
+	    } 
+	}
+	
+	// not found. make one.
+	StaticForMethodDecl sfd = (StaticForMethodDecl) this.p(t);
+	sfd.is$Final = true;
+
+	return sfd;
+    }
+
+    public ConstructorDecl ConstructorDecl.findSubstitutedConstructorDecl(MemberSubstitutor t) {
+	for ( int i=0; i<t.getNumBodyDecl(); i++) {
+	    if ( t.getBodyDecl(i) instanceof ConstructorDeclSubstituted ) {
+		ConstructorDeclSubstituted sfd = 
+		    (ConstructorDeclSubstituted) t.getBodyDecl(i);
+		if ( sfd.getOriginal() == this )
+		    return sfd;
+	    }
+	}
+	
+	// not found. make one.
+	ConstructorDecl sfd = (ConstructorDecl) this.p(t);
+	sfd.is$Final = true;
+	t.addBodyDecl(sfd);
+	
+	return sfd;
+    }
+    public StaticForConstructorDecl StaticForConstructorDecl.findSubstitutedConstructorDecl(MemberSubstitutor t) {
+	for ( int i=0; i<t.getNumBodyDecl(); i++) {
+	    if ( t.getBodyDecl(i) instanceof StaticForConstructorDeclSubstituted ) {
+		StaticForConstructorDeclSubstituted sfd = 
+		    (StaticForConstructorDeclSubstituted) t.getBodyDecl(i);
+		if ( sfd.getOriginal() == this )
+		    return sfd;
+	    } 
+	}
+	
+	// not found. make one.
+	StaticForConstructorDecl sfd = (StaticForConstructorDecl) this.p(t);
+	sfd.is$Final = true;
+
+	return sfd;
+    }
+}
+
+aspect MJLookupConstructor {
+
+    boolean ConstrainedTypeVariable.usedAsSupertype = false;
+    public boolean ConstrainedTypeVariable.usedAsSupertype() {
+	return usedAsSupertype; 
+    }
+    public void ConstrainedTypeVariable.setUsedAsSupertype(boolean p) {
+	usedAsSupertype = p;
+    }
+
+
+    // A constrained TypeVariable used as a supertype must not be final.
+    eq ConstrainedTypeVariable.isFinal() = 
+	usedAsSupertype ? false : super.isFinal() ;
+
+    // Add a default constructor to a TypeVariable constrained to be a class. 
+    eq ConstrainedTypeVariable.constructors() {
+	if ( getConstraint().equals("class")) {
+	    ConstructorDecl cd = new ConstructorDecl(new Modifiers(new List().add(new Modifier("public"))), typeName(), new List(), new List(), new Opt(), new Block());
+	    addBodyDecl(cd);
+	    cd.is$Final = true;
+	    cd.bypassErrorChecking = true;
+
+	    Collection c = new ArrayList();
+	    c.add(cd);
+	    return c;
+	}
+	return super.constructors();
+    }
+
+    // TODO: what about super constructor?  any?
+}
+
+aspect AncestorMethods {
+  // this is used when checking correct overriding, hiding, and implementation of abstract methods
+  syn lazy SimpleSet TypeDecl.ancestorMethods(MethodDecl md) = 
+      md.ancestorMethods(this);
+
+  syn lazy SimpleSet MethodDecl.ancestorMethods(TypeDecl t) =
+      t.ancestorMethods(signature());
+
+  eq StaticForMethodDecl.ancestorMethods(TypeDecl t) =
+      t.ancestorMethodsOfReflectiveMethod(this);
+
+  syn lazy SimpleSet TypeDecl.ancestorMethodsOfReflectiveMethod(StaticForMethodDecl md) = SimpleSet.emptySet;
+
+  eq InterfaceDecl.ancestorMethodsOfReflectiveMethod(StaticForMethodDecl md) {
+      SimpleSet set = SimpleSet.emptySet;
+
+      for(Iterator outerIter = superinterfacesIterator(); outerIter.hasNext(); ) {
+	  TypeDecl typeDecl = (TypeDecl)outerIter.next();
+	  for(Iterator iter = typeDecl.reflectiveMethods().iterator(); iter.hasNext(); ) {
+	      MethodDecl m = (MethodDecl)iter.next();
+	      if ( md.signatureOverrides(m))
+		  set = set.add(m);
+	  }
+      }
+      if(!superinterfacesIterator().hasNext()) {
+	  // add a static method that encompasses all non-private methods of the
+	  // superclass.
+	  StaticForMethodDecl nonPrivateMethod = typeObject().everyNonPrivateMethod();
+
+	  // substituted and unify with md.
+	  // id could be a member method of this if
+	  // 1. its' enclosing iterator decl is subsumed by one of this's
+	  // method's iterator decl.
+	  HashMap uniMap = new HashMap();
+	  if ( nonPrivateMethod.getIteratorDecl().subsumes(md.getIteratorDecl(), uniMap)) {
+	      // 2. the name it maps to is used in declaring method.
+	      if ( nonPrivateMethod.substitute(uniMap).identifier().equals(md.identifier())) {
+		  StaticForMethodDeclSubstituted smd = 
+		      nonPrivateMethod.substitute(uniMap);
+		  set = set.add(smd);
+	      }
+	  }
+      }
+      return set;
+  }
+  
+  eq ClassDecl.ancestorMethodsOfReflectiveMethod(StaticForMethodDecl md) {
+      SimpleSet set = SimpleSet.emptySet;
+   
+      if ( hasSuperclass()) {
+	  // fetch all non-private reflective methods from superclass.
+	  Collection superRef = superclass().reflectiveMethods();
+	  for ( Iterator it = superRef.iterator(); it.hasNext(); ) {
+	      MethodDecl m = (MethodDecl) it.next();
+	      if ( md.signatureOverrides(m) && !m.isPrivate())
+		  set = set.add(m);
+	  }
+
+	  if ( superclass() != typeObject()) {
+	      // add a method that encompasses all non-private methods of the
+	      // superclass
+	      StaticForMethodDecl nonPrivateMethod = superclass().everyNonPrivateMethod();
+	      
+	      // substituted and unify with md.
+	      // id could be a member method of this if
+	      // 1. its' enclosing iterator decl is subsumed by one of this's
+	      // method's iterator decl.
+	      HashMap uniMap = new HashMap();
+	      if ( nonPrivateMethod.getIteratorDecl().subsumes(md.getIteratorDecl(), uniMap)) {
+		  // 2. the name it maps to is used in declaring method.
+		  if ( nonPrivateMethod.substitute(uniMap).identifier().equals(md.identifier())) {
+		      StaticForMethodDeclSubstituted smd = 
+			  nonPrivateMethod.substitute(uniMap);
+		      set = set.add(smd);
+		  }
+	      }
+	  }
+      }
+
+      if(set.size() != 1 || ((MethodDecl)set.iterator().next()).isAbstract()) { 
+	  for ( Iterator iter = interfacesIterator(); iter.hasNext(); ) {
+	      TypeDecl ifd = (TypeDecl) iter.next();
+
+	      // TODO: ifd could be a TypeVariable. Is this the correct behavior?
+	      SimpleSet s2 = ifd.ancestorMethods(md);
+	      
+	      for ( Iterator s2it = s2.iterator(); s2it.hasNext(); ) {
+		  MethodDecl m = (MethodDecl)s2it.next();
+		  set = set.add(m);
+	      }
+	  }
+      } 
+
+      if (!hasSuperclass()) return set;
+      
+      if(set.size() == 1) {
+	  MethodDecl m = (MethodDecl)set.iterator().next();
+	  if(!m.isAbstract()) {
+	      boolean done = true;
+	      for(Iterator iter = superclass().ancestorMethods(md).iterator(); 
+		  iter.hasNext(); ) {
+		  MethodDecl n = (MethodDecl)iter.next();
+		  if(n.isPrivate() || !n.accessibleFrom(m.hostType()))
+		      done = false;
+	      }
+	      if(done) return set;
+	  }
+      }
+
+      for(Iterator iter = superclass().ancestorMethods(md).iterator(); iter.hasNext(); ) {
+	  MethodDecl m = (MethodDecl)iter.next();
+	  set = set.add(m);
+      }
+      return set;     
+  }
+}

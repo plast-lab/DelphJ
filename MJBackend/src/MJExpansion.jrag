@@ -1,0 +1,848 @@
+aspect MJExpansion {
+    protected void ParClassDecl.expand(ClassNode cn) {
+	// change name
+	cn.name = expandedConstantPoolName();
+
+	// remove signature.
+	cn.signature = null;
+	// change source file.
+	//	cn.sourceFile = sourceFile();
+
+	// change superclass.
+	if ( hasSuperclass()) {
+	    if ( !superclass().isParameterizedType() ||
+		 !superclass().shouldErase())
+		cn.superName = superclass().expandedConstantPoolName();
+	}
+
+	// change interface.
+	java.util.List interfaces = new java.util.ArrayList();
+	for ( int i=0; i<getNumImplements(); i++) {
+	    TypeDecl iType = getImplements(i).type();
+	    if (!iType.shouldErase())
+		interfaces.add(iType.expandedConstantPoolName());
+	    else 
+		interfaces.add(iType.constantPoolName());
+	}
+	cn.interfaces = interfaces;
+
+	// transform fields.
+	expandFields(cn);
+
+	// transform methods.
+	expandMethods(cn);
+    }
+
+    // TODO: this may not be right... 
+    protected MemberNode BodyDecl.transformMemberNode(MemberNode mn, ParClassDecl parClass) {
+	throw new Error("transformMemberNode not implemented by " +
+			getClass().getName());
+    }
+
+    protected java.util.List BodyDecl.transformLocalVariableNode(LocalVariableNode n) {
+	java.util.List list = new java.util.ArrayList();
+	// localVariables may need to be expanded to multiple variables,
+	// depending on what type they are declared with.
+	// We need to do this before visiting the whole node.
+	if ( n.name.equals("this")) {
+	    list.add(n);
+	    return list;
+	}
+
+	Signatures s = new Signatures(n.desc);
+	Access ta = s.typeSignature();
+	TypeDecl type = retrieveType(ta);
+	if ( !type.isVectorTypeVariable()) {
+	    list.add(n);
+	    return list;
+	}
+
+	// Just expand the local variable node into howmany ever there 
+	// needs to be, change the types. But leave the rest to
+	// the regular visitor.
+	List newLocalTypes = type.expandAccessList(expansionSubstitutions);
+	for ( int i=0; i<newLocalTypes.getNumChild(); i++) {
+	    LocalVariableNode newNode = NodeCopier.copyLocalVariableNode(n);
+	    Access newTa = (Access) newLocalTypes.getChild(i);
+	    if ( newTa.type().isUnknown()) {
+		System.err.println("unknown type: " + n.desc);
+	    } else {
+		newNode.desc = newTa.type().typeDescriptor();
+		newNode.name = n.name+i;
+		// must change index, too.
+		newNode.index=n.index+i;
+	    }
+	    // add new node.
+	    list.add(newNode);
+	}
+	return list;
+    }
+
+    protected MemberNode ConstructorDeclSubstituted.transformMemberNode(MemberNode mn, ParClassDecl parClass) {
+	ParTypeDecl ht = (ParTypeDecl) hostType();
+	GenericTypeDecl gtd = (GenericTypeDecl) ht.genericDecl();
+
+	HashMap substitutions = new HashMap();
+	// put into the map the parameterization from this
+	for ( int i=0; i<gtd.getNumTypeParameter(); i++) {
+	    substitutions.put(gtd.getTypeParameter(i),
+			      ht.getArgument(i).type());
+	}
+	
+	MethodNode newNode = NodeCopier.copyMethodNode((MethodNode)mn);
+
+	// modify descriptor;
+	newNode.desc = descName();
+
+	// take away signature.
+	newNode.signature = null; //descName();
+
+	InsnTransformVisitor insnVisitor = new InsnTransformVisitor(new org.objectweb.asm.commons.EmptyVisitor(), parClass, this, substitutions);
+	
+	newNode.accept(insnVisitor);
+	
+	newNode.instructions = insnVisitor.instructions;
+	
+	// transform local variables.
+	newNode.localVariables = insnVisitor.localVariables;
+
+	newNode.tryCatchBlocks = insnVisitor.tryCatchBlocks;
+
+	return newNode;	
+    }
+
+    protected HashMap MethodDecl.findReplacementLocalVariables(MethodNode mn) {
+	// offset keeps how much we have to increase the subsequent 
+	// local variable indices, in case the preceding index got increased
+	// because of expansion.
+	int offset = 0;
+
+	HashMap nodesMap = new HashMap();
+	for ( ListIterator lvIt = mn.localVariables.listIterator(); 
+	      lvIt.hasNext(); ) {
+	    LocalVariableNode lvNode = (LocalVariableNode) lvIt.next();
+	    int originalIndex = lvNode.index;
+	    lvNode.index += offset;
+
+	    java.util.List newLVNodes = transformLocalVariableNode(lvNode);
+	    offset += newLVNodes.size()-1;
+	    
+	    // reset the index on the original node.
+	    lvNode.index = originalIndex;
+
+	    nodesMap.put(lvNode, newLVNodes);
+	}
+	return nodesMap;
+    }
+
+    protected MemberNode FieldDeclaration.transformMemberNode(MemberNode mn, ParClassDecl parClass) {
+	FieldNode newNode = NodeCopier.copyFieldNode((FieldNode) mn);
+
+	// see if need to change name.
+	newNode.name = getID();
+	
+	// modify descriptor.
+	newNode.desc = type().typeDescriptor();
+
+	newNode.signature = null;
+
+	return newNode;
+    }
+
+    syn lazy java.util.List MethodDecl.retrieveStaticForStmts(MethodNode mn) {
+	java.util.List staticForStmts = new ArrayList();
+
+	// read StaticForStmtsAttribute.
+	ASMStaticForStmtsAttribute staticForStmtsAttr = null;
+	if ( mn.attrs != null ) {
+	    for ( int i=0; i<mn.attrs.size(); i++ ) {
+		if ( ((org.objectweb.asm.Attribute) mn.attrs.get(i)).type.equals("StaticForStmts")) {
+		    staticForStmtsAttr = 
+			(ASMStaticForStmtsAttribute) mn.attrs.get(i);
+		    break;
+		}
+	    }
+	}
+
+	if ( staticForStmtsAttr == null )  return staticForStmts;
+	if ( !hostType().compilationUnit().fromSource() &&
+	     !hasBlock()) {
+	    setBlock(new Block());
+	}
+
+	for ( Iterator<ASMStaticForStmtsAttribute.StaticForStmtsAttribute> it = staticForStmtsAttr.staticForStmts.iterator(); 
+	      it.hasNext();) {
+	    ASMStaticForStmtsAttribute.StaticForStmtsAttribute stmtsAttr = it.next();
+	    if (hostType().compilationUnit().fromSource()) {
+		// we don't have to create statements. just find them.
+		for ( int i=0; i<getBlock().getNumStmt(); i++) {
+		    if ( getBlock().getStmt(i) instanceof StaticForStmt ) {
+			StaticForStmt s = (StaticForStmt) getBlock().getStmt(i);
+			if ( s.getIteratorDecl().signature().equals(stmtsAttr.iterator_attr.signature())) {
+			    staticForStmts.add(s);
+			    s.staticForStmtAttr = stmtsAttr;
+			    break;
+			}
+		    }
+		}
+	    } else {
+		Signatures.IteratorDeclSignature idSig = new Signatures.IteratorDeclSignature(stmtsAttr.iterator_attr.signature());
+		IteratorDecl itDecl = 
+		    new IteratorDecl(idSig.patternTypeParameters(), 
+				     idSig.patternNameParameters(), 
+				     idSig.pattern(), idSig.nestedPatterns(),
+				     new List());
+		// add a statement to block.
+		StaticForStmt s = new StaticForStmt(itDecl, new List(), new List());
+		s.staticForStmtAttr = stmtsAttr;
+		getBlock().addStmt(s);
+		staticForStmts.add(s);
+	    }
+	}
+	return staticForStmts;
+    }
+    
+    public ASMStaticForStmtsAttribute.StaticForStmtsAttribute StaticForStmt.staticForStmtAttr = null;
+
+    /*    
+    eq ExpandedMethodDecl.retrieveStaticForStmts(MethodNode mn) {
+	java.util.List stmts = original.retrieveStaticForStmts(mn);
+	// apply substitution.
+	java.util.List newStmts = new ArrayList();
+	for ( Iterator sIt = stmts.iterator(); sIt.hasNext(); ) {
+	    StaticForStmt s = (StaticForStmt) sIt.next();
+	    StaticForStmt news = s.substitute(expansionSubstitutions);
+	    news.staticForStmtAttr = s.staticForStmtAttr;
+
+	    newStmts.add(news);
+	}
+	return newStmts;
+    }
+    */
+    eq MethodDeclSubstituted.retrieveStaticForStmts(MethodNode mn) {
+	java.util.List stmts = getOriginal().retrieveStaticForStmts(mn);
+	// apply substitution.
+	java.util.List newStmts = new ArrayList();
+	for ( Iterator sIt = stmts.iterator(); sIt.hasNext(); ) {
+	    StaticForStmt s = (StaticForStmt) sIt.next();
+	    StaticForStmt news = s.substitute((ParTypeDecl) hostType());
+	    news.staticForStmtAttr = s.staticForStmtAttr;
+	    newStmts.add(news);
+	}
+	return newStmts;
+    }
+
+    eq StaticForMethodDeclSubstituted.retrieveStaticForStmts(MethodNode mn) {
+	java.util.List stmts = original.retrieveStaticForStmts(mn);
+	// apply substitution.
+	java.util.List newStmts = new ArrayList();
+	for ( Iterator sIt = stmts.iterator(); sIt.hasNext(); ) {
+	    StaticForStmt s = (StaticForStmt) sIt.next();
+	    StaticForStmt news = s.substitute((ParTypeDecl) hostType());
+	    news.staticForStmtAttr = s.staticForStmtAttr;
+	    newStmts.add(news);
+	}
+	return newStmts;
+    }
+
+    protected void MethodDecl.transformLocalVariables(MethodNode newNode) {
+	// localVariables may need to be expanded to multiple variables,
+	// depending on what type they are declared with.
+	// We need to do this before visiting the whole node.
+	// every original local variable has a mapping in nodesMap.
+
+	if ( newNode.localVariables != null ) {
+	    HashMap nodesMap = findReplacementLocalVariables(newNode);
+	    
+	    // remove all original local variables and replace with new ones.
+	    newNode.localVariables.clear();
+	    
+	    for ( Iterator nIt = nodesMap.keySet().iterator(); nIt.hasNext(); ) {
+		LocalVariableNode origNode = (LocalVariableNode) nIt.next();
+		java.util.List newLVNodes 
+		    = (java.util.List) nodesMap.get(origNode);
+		
+		// add the replaced local variables.
+		for ( Iterator newIt = newLVNodes.iterator(); newIt.hasNext(); ) {
+		    newNode.localVariables.add(newIt.next());
+		}
+		
+		// find the aload instructions for the original variable, and 
+		// replace with the appropriate number of aload's depending on 
+		// what argument types expend to.
+		ArrayList insnList = new ArrayList();
+		for(ListIterator iit = newNode.instructions.iterator(); 
+		    iit.hasNext(); ) {
+		    AbstractInsnNode inode = (AbstractInsnNode) iit.next();
+		    if (inode instanceof VarInsnNode &&
+			((VarInsnNode) inode).var == origNode.index) 
+			insnList.add(inode);
+		}
+		for(Iterator insnIt=insnList.iterator(); insnIt.hasNext(); ) {
+		    // This is a var insn node for the variable we are
+		    // dealing with.  Expand it into a list of instructions
+		    // with the var replaced with the expanded local
+		    // variables.
+		    VarInsnNode inode = (VarInsnNode) insnIt.next();
+		    for ( int i=newLVNodes.size()-1; i>=0; i--) {
+			LocalVariableNode newLV = (LocalVariableNode) newLVNodes.get(i);
+			newNode.instructions.insert(inode,new VarInsnNode(transformOpcode(inode.getOpcode(), newLV), newLV.index)); 
+		    }
+		    // remove the original instruction.
+		    newNode.instructions.remove(inode);
+		}
+	    }
+	}
+    }
+
+    protected MemberNode MethodDecl.transformMemberNode(MemberNode mn, ParClassDecl parClass) {
+	// if this is a bridge method, delete it.
+	if ( ( ((MethodNode) mn).access & Opcodes.ACC_BRIDGE ) != 0 ) {
+	    return null;
+	}
+
+	MethodNode newNode = NodeCopier.copyMethodNode((MethodNode)mn);
+	
+	// see if we need to change name.
+	newNode.name = getID();
+	
+	// TODO: modify exceptions.
+	
+	transformLocalVariables(newNode);
+
+	// find all static for stmts.
+	java.util.List staticForStmts = retrieveStaticForStmts(newNode);
+	for ( Iterator sit = staticForStmts.iterator(); sit.hasNext(); ) {
+	    StaticForStmt s = (StaticForStmt) sit.next();
+
+	    // get the corresponding iterator decl stmt.
+	    ASMStaticForStmtsAttribute.StaticForStmtsAttribute staticForStmtAttr = s.staticForStmtAttr;
+	    int begin = staticForStmtAttr.begin_instr;
+	    int end = staticForStmtAttr.end_instr;
+
+	    InsnList replicatedInsns = new InsnList();
+
+	    // get the mappings for each element in the iterator decl's range. 
+	    IteratorDecl sid = s.getIteratorDecl();
+	    IteratorDecl sidSub = sid.lookupParIteratorDecl(parClass);
+
+	    int instr_begin = -1;
+	    int instr_end = -1;
+
+	    for ( Iterator subMaps = sidSub.reflectiveElmts().values().iterator();
+		  subMaps.hasNext(); ) {
+		Map substitutions = (Map) subMaps.next();
+		substitutions.putAll(expansionSubstitutions);
+
+		// create a copy of the instructions to be replicated.
+		/*
+		InsnList toReplicate = NodeCopier.copyInsnList(newNode.instructions,
+							       begin, end);
+		*/
+		InsnCopyVisitor icv =
+		    new InsnCopyVisitor(new org.objectweb.asm.commons.EmptyVisitor(), begin, end);
+		newNode.accept(icv);
+		InsnList toReplicate = icv.instructions;
+		
+		instr_begin = icv.instr_begin;
+		instr_end = icv.instr_end;
+
+		// create replicated instructions.
+		InsnTransformVisitor iv = 
+		    new InsnTransformVisitor(new org.objectweb.asm.commons.EmptyVisitor(), 
+					     parClass, this, substitutions, s);
+		toReplicate.accept(iv);
+		replicatedInsns.add(iv.instructions);
+	    }
+
+	    /*	    
+	    newNode.instructions.insert(newNode.instructions.get(end-1), replicatedInsns);
+	    // remove instructions used for replication.
+	    NodeCopier.removeInsns(newNode.instructions, begin, end);
+	    */
+	    if ( instr_end > -1 && instr_begin > -1 ) {
+		newNode.instructions.insert(newNode.instructions.get(instr_end-1), replicatedInsns);
+		
+		// remove instructions used for replication.
+		NodeCopier.removeInsns(newNode.instructions, instr_begin, instr_end);
+	    }
+	}
+
+	InsnTransformVisitor insnVisitor = new InsnTransformVisitor(new org.objectweb.asm.commons.EmptyVisitor(), parClass, this, expansionSubstitutions);
+
+	newNode.accept(insnVisitor);
+	newNode.instructions = insnVisitor.instructions;
+	newNode.localVariables = insnVisitor.localVariables;
+	newNode.tryCatchBlocks = insnVisitor.tryCatchBlocks;
+	newNode.maxStack = insnVisitor.maxStack;
+	//	newNode.maxLocals = newNode.localVariables.size();
+
+	newNode.maxLocals = type().isVoid() ? insnVisitor.maxLocals : insnVisitor.maxLocals+1;
+
+	transformDescriptor(newNode, insnVisitor);
+
+	// remove IteratorDecl attribute.
+	if ( newNode.attrs != null ) {
+	    for ( int j=0; j<newNode.attrs.size(); j++) {
+		if ( ((org.objectweb.asm.Attribute)newNode.attrs.get(j)).type.equals("IteratorDecl"))
+		    newNode.attrs.remove(j);
+	    }
+	}
+	return newNode;
+    }
+
+    protected void MethodDecl.transformDescriptor(MethodNode newNode,
+						  InsnTransformVisitor insnVisitor) {
+	// modify descriptor;
+	//	    newNode.desc = descName();
+	String newDesc = insnVisitor.retrieveMethodDesc(newNode.desc);
+	newNode.desc = newDesc;
+	
+	// modify signature.
+	newNode.signature = null; //descName();    
+    }
+    
+    protected void BridgeMethodDecl.transformDescriptor(MethodNode newNode,
+							InsnTransformVisitor insnVisitor) {
+	// Do not transform descriptor of bridge methods.
+    }
+    
+    protected int BodyDecl.transformOpcode(int opcode, LocalVariableNode lv) {
+	// retrieve type of local variable node
+	Signatures s = new Signatures(lv.desc);
+	Access ta = s.typeSignature();
+	TypeDecl t = retrieveType(ta);
+	TypeDecl newType = t.substitute(expansionSubstitutions).type();
+
+	if ( opcode >= Opcodes.ILOAD && opcode <= Opcodes.ALOAD) {
+	    // this is a load opcode.
+	    if ( newType.isDouble()) return Opcodes.DLOAD;
+	    if (newType.isFloat()) return Opcodes.FLOAD;
+	    if (newType.isLong()) return Opcodes.LLOAD;
+	    if (newType.isPrimitive()) return Opcodes.ILOAD;
+	    return Opcodes.ALOAD;
+	}
+	if ( opcode >= Opcodes.ISTORE && opcode <= Opcodes.ASTORE) {
+	    if ( newType.isDouble()) return Opcodes.DSTORE;
+	    if (newType.isFloat()) return Opcodes.FSTORE;
+	    if (newType.isLong()) return Opcodes.LSTORE;
+	    if (newType.isPrimitive()) return Opcodes.ISTORE;
+	    return Opcodes.ASTORE;		
+	}
+	if( opcode >= Opcodes.IALOAD && opcode <= Opcodes.SALOAD) {
+	    if ( newType.isByte() || newType.isBoolean()) 
+		return Opcodes.BALOAD;
+	    if ( newType.isChar()) return Opcodes.CALOAD;
+	    if ( newType.isDouble()) return Opcodes.DALOAD;
+	    if ( newType.isFloat()) return Opcodes.FALOAD;
+	    if ( newType.isInt()) return Opcodes.IALOAD;
+	    if ( newType.isLong()) return Opcodes.FALOAD;
+	    if ( newType.isShort()) return Opcodes.SALOAD;
+	    return Opcodes.AALOAD;
+	}
+	if(opcode >= Opcodes.IASTORE && opcode <= Opcodes.SASTORE) {
+	    if ( newType.isByte() || newType.isBoolean()) 
+		return Opcodes.BASTORE;
+	    if ( newType.isChar()) return Opcodes.CASTORE;
+	    if ( newType.isDouble()) return Opcodes.DASTORE;
+	    if ( newType.isFloat()) return Opcodes.FASTORE;
+	    if ( newType.isInt()) return Opcodes.IASTORE;
+	    if ( newType.isLong()) return Opcodes.FASTORE;
+	    if ( newType.isShort()) return Opcodes.SASTORE;
+	    return Opcodes.AASTORE;
+	}		
+	return opcode;
+    }
+
+    protected void ParClassDecl.expandFields(ClassNode cn) {
+	java.util.List fields = cn.fields;
+	java.util.List newFields = new ArrayList();
+
+	for ( Iterator fIt = fields.iterator(); fIt.hasNext(); ) {
+	    FieldNode fn = (FieldNode) fIt.next();
+	    if ( reflectiveMemberNode(fn) ) {
+		StaticForFieldDeclaration fd = genericDecl().reflectiveField(fn);
+		if ( fd != null ) {
+		    StaticForFieldDeclarationSubstituted parfd = 
+			(StaticForFieldDeclarationSubstituted) fd.findSubstitutedFieldDeclaration(this);
+		    //			(StaticForFieldDeclarationSubstituted) fd.p(this);
+		    List expandedFields = parfd.expandedFields();
+		    for ( int i=0; i<expandedFields.getNumChild(); i++) {
+			FieldDeclaration expandedFd =
+			    (FieldDeclaration) expandedFields.getChild(i);
+			
+			FieldNode newNode = 
+			    (FieldNode) expandedFd.transformMemberNode(fn, this);
+			newFields.add(newNode);
+		    }
+		} else {
+		    // something is seriously wrong.
+		    throw new Error("Cannot find the definition for " +
+				    "reflectively declared field " +
+				    fn.name);
+		}
+	    } else {
+		FieldDeclaration fd = findField(fn);
+		if ( fd != null ) {
+		    FieldNode newfn = (FieldNode) fd.transformMemberNode(fn, this);
+		    newFields.add(newfn);
+		}
+	    }
+	}
+
+	cn.fields = newFields;
+    }
+    
+    protected void ParClassDecl.expandMethods(ClassNode cn) {
+	java.util.List methods = cn.methods;
+	java.util.List newMethods = new ArrayList();
+
+	for ( Iterator mIt = methods.iterator(); mIt.hasNext(); ) {
+	    MethodNode mn = (MethodNode) mIt.next();
+	    if ( reflectiveMemberNode(mn) ) {
+		// find the corresponding method in gd.
+		// we do this because gd's corresponding method already has
+		// the reflective iteration info parsed with the appropriate
+		// information.
+		StaticForMethodDecl md = genericDecl().reflectiveMethod(mn);
+		
+		if ( md != null ) {
+		    StaticForMethodDeclSubstituted subMd = 
+			(StaticForMethodDeclSubstituted) md.findSubstitutedMethodDecl(this);
+			//			(StaticForMethodDeclSubstituted) md.p(this);
+		    List expandedMethods = subMd.expandedMethods();
+
+		    for ( int i=0; i<expandedMethods.getNumChild(); i++) {
+			MethodDecl expandedMd = 
+			    (MethodDecl) expandedMethods.getChild(i);
+
+			MethodNode newNode = 
+			    (MethodNode) expandedMd.transformMemberNode(mn, this);
+			if ( newNode != null )
+			    newMethods.add(newNode);
+		    }
+		} else {
+		    // something is seriously wrong.
+		    throw new Error("Cannot find the definition for " +
+				    "reflectively declared method " +
+				    mn.name);
+		}
+	    } else {
+		BodyDecl bd = findMethod(mn);
+		if ( bd != null ){ 
+		    MethodNode newMn = (MethodNode) bd.transformMemberNode(mn, this);
+		    if ( newMn != null ) 
+			newMethods.add(newMn);
+		}
+	    }
+	}
+	cn.methods = newMethods;
+    }
+
+    public BodyDecl TypeDecl.findMethod(MethodNode mn) {
+	if ( mn.name.equals("<init>")) {
+	    // check constructors.
+	    for (Iterator cIt = constructors().iterator(); cIt.hasNext(); ) {
+		ConstructorDecl cd = (ConstructorDecl) cIt.next();
+		if ( cd.isSameMethod(mn)) return cd;
+	    }
+	} else {
+	    MethodDecl curr = null;
+	    for ( Iterator mIt = methodsIterator(); mIt.hasNext(); ) {
+		MethodDecl md = (MethodDecl) mIt.next();
+		if ( md.isSameMethod(mn))  {
+		    if ( curr == null )
+			curr = md;
+		    else {
+			// find which one is more specific.
+			if ( md.hostType().subtype(curr.hostType()))
+			    curr = md;
+		    }
+		}
+	    }
+	    if ( curr != null ) return curr;
+	}
+
+	if ( Program.verbose())
+	    System.err.println("WARNING: Could not find method " + mn.name + 
+			       " " + mn.desc);
+			       
+	return null;
+    }
+    
+
+    public FieldDeclaration TypeDecl.findField(FieldNode fn) {
+	// if fn is a reflectively declared one, we need to iterate reflective
+	// fields.
+	for ( Iterator fIt = memberFields(fn.name).iterator(); fIt.hasNext(); ) {
+	    FieldDeclaration f = (FieldDeclaration) fIt.next();
+	    if ( f.getID().equals(fn.name))
+		return f;
+	}
+
+	// check signature to see if this field belongs to an inner class.
+	// if so, don't translate.
+	if ( Program.verbose())
+	    System.err.println("WARNING: Could not find field node : " + 
+			       fn.signature + "." + fn.desc + " " + fn.name);
+
+	return null;
+    }
+
+    /*
+    public boolean ConstructorDecl.isSameMethod(MethodNode mn) {
+	return mn.name.equals("<init>")
+	    && (mn.signature == null || 
+		mn.signature.equals(constructorTypeSignature()));
+    }
+    public boolean MethodDecl.isSameMethod(MethodNode mn) {
+	return mn.name.equals(getID()) &&
+	    (mn.signature == null || 
+	     mn.signature.equals(methodTypeSignature()));
+    }
+    */
+    public boolean ConstructorDecl.isSameMethod(MethodNode mn) {
+	if ( !mn.name.equals("<init>")) return false;
+
+	MethodDescriptor ndd = new MethodDescriptor(mn.desc);
+
+	List newParamList = hostType().isInnerType() ? 
+	    ndd.parameterListSkipFirst() : 
+	    ndd.parameterList();
+
+	return parameterListSubtype(this.getParameterList(),newParamList);
+    }
+    public boolean MethodDecl.isSameMethod(MethodNode mn) {
+	if ( !mn.name.equals(getID())) return false;
+
+	MethodDescriptor ndd = new MethodDescriptor(mn.desc);
+
+	List newParamList = ndd.parameterList();
+	return parameterListSubtype(this.getParameterList(), ndd.parameterList());
+    }
+    public boolean ConstructorDeclSubstituted.isSameMethod(MethodNode mn) {
+	return ((ConstructorDecl) getOriginal()).isSameMethod(mn);
+    }
+    public boolean MethodDeclSubstituted.isSameMethod(MethodNode mn) {
+	return ((MethodDecl) getOriginal()).isSameMethod(mn);
+    }
+
+    public boolean BodyDecl.parameterListSubtype(List pl1, List pl2) {
+	if ( pl1.getNumChild() == pl2.getNumChild()) {
+	    boolean matched = true;
+	    for ( int i=0; i<pl1.getNumChild(); i++) {
+		TypeDecl pl1Type = ((ParameterDeclaration) pl1.getChild(i)).type();
+		TypeDecl pl2Type = retrieveType(((ParameterDeclaration) pl2.getChild(i)).getTypeAccess());
+		/*
+		if ( hostType().isParameterizedType())
+		pl2Type = pl2Type.substitute((Parameterization) hostType()).type();*/
+		//		if ( pl1Type != pl2Type ) {
+		if (!pl1Type.subtype(pl2Type)) {
+		    matched = false;
+		    break;
+		}
+	    }
+	    /*
+	    if ( matched ) return true;
+
+	    // check erased parameters.
+	    for ( int i=0; i<pl1.getNumChild(); i++) {
+		TypeDecl pl1Type = ((ParameterDeclaration) pl1.getChild(i)).type().erasure();
+		TypeDecl pl2Type = retrieveType(((ParameterDeclaration) pl2.getChild(i)).getTypeAccess());
+		if ( hostType().isParameterizedType())
+		    pl2Type = pl2Type.substitute((Parameterization) hostType()).type();
+		//		if ( pl1Type != pl2Type ) {
+		if (!pl1Type.subtype(pl2Type)) {
+		    matched = false;
+		    break;
+		}
+	    }
+	    */
+	    return matched;
+	}
+	return false;
+    }
+
+    public boolean FieldDeclaration.isSameField(FieldNode fn) {
+	return fn.name.equals(getID());
+    }
+    public boolean FieldDeclarationSubstituted.isSameField(FieldNode fn) {
+	return ((FieldDeclaration) getOriginal()).isSameField(fn);
+    }
+
+    public StaticForFieldDeclaration TypeDecl.reflectiveField(FieldNode fn) {
+	Collection rfields = reflectiveFields();
+	for ( Iterator rfIt = rfields.iterator(); rfIt.hasNext(); ) {
+	    StaticForFieldDeclaration fd = (StaticForFieldDeclaration) rfIt.next();
+	    if ( fd.getIteratorDecl().signature().equals(iteratorDeclAttribute(fn)) && fn.name.equals(fd.getID()))
+		return fd;
+	}
+	return null;
+    }
+
+    public StaticForMethodDecl TypeDecl.reflectiveMethod(MethodNode mn) {
+	Collection rmethods = reflectiveMethods();
+	for ( Iterator rmIt = rmethods.iterator(); rmIt.hasNext(); ) {
+	    StaticForMethodDecl md = (StaticForMethodDecl) rmIt.next();
+	    if ( md.getIteratorDecl().signature().equals(iteratorDeclAttribute(mn)) && mn.name.equals(md.getID()) && 
+		 mn.desc.equals(md.descName()) &&
+		 ( mn.signature == null || 
+		   mn.signature.equals( md.methodTypeSignature())))
+		return md;
+	}
+	return null;
+    }
+    
+    public String TypeDecl.iteratorDeclAttribute(MemberNode mn) {
+	if ( mn.attrs != null ) {
+	    for ( Iterator attrIt = mn.attrs.iterator(); attrIt.hasNext(); ) {
+		org.objectweb.asm.Attribute a = (org.objectweb.asm.Attribute)attrIt.next();
+		if ( a.type.equals("IteratorDecl"))
+		    return ((ASMIteratorDeclAttribute) a).signature();
+	    }
+	}
+	return "";
+    }
+
+    protected boolean TypeDecl.reflectiveMemberNode(MemberNode mn) {
+	return !iteratorDeclAttribute(mn).equals("");
+    }
+
+    refine GenericsCodegen eq ParClassDecl.constantPoolName() =
+	shouldErase() ? GenericsCodegen.ParClassDecl.constantPoolName() 
+	: expandedConstantPoolName();
+    refine GenericsCodegen eq ParInterfaceDecl.constantPoolName() =
+	shouldErase() ? GenericsCodegen.ParInterfaceDecl.constantPoolName() 
+	: expandedConstantPoolName();
+    refine GenericsCodegen eq TypeVariable.constantPoolName() =
+	shouldErase() ? GenericsCodegen.TypeVariable.constantPoolName() 
+	: expandedConstantPoolName();
+
+    syn lazy String TypeDecl.expandedConstantPoolName () = constantPoolName();
+    eq ParTypeDecl.expandedConstantPoolName () {
+    	String cpName = genericDecl().constantPoolName();
+	int lastSlash = 	cpName.lastIndexOf('/');
+
+	StringBuffer buf = new StringBuffer(cpName.substring(0, lastSlash+1) +
+					    expandedName());
+	return buf.toString();
+    }
+    eq RawClassDecl.expandedConstantPoolName() = genericDecl().expandedConstantPoolName();
+    eq RawInterfaceDecl.expandedConstantPoolName() = genericDecl().expandedConstantPoolName();
+    eq TypeVariable.expandedConstantPoolName() = getID();
+
+    refine GenericsCodegen eq ParClassDecl.typeDescriptor() =
+	shouldErase() ? GenericsCodegen.ParClassDecl.typeDescriptor()
+	: expandedTypeDescriptor();
+    refine GenericsCodegen eq ParInterfaceDecl.typeDescriptor() = 
+	shouldErase() ? GenericsCodegen.ParInterfaceDecl.typeDescriptor()
+	: expandedTypeDescriptor();
+    
+    syn lazy String TypeDecl.expandedTypeDescriptor() = typeDescriptor();
+    eq ParTypeDecl.expandedTypeDescriptor() {
+    	String td = genericDecl().typeDescriptor();
+	int lastSlash = td.lastIndexOf('/');
+	
+	StringBuffer buf = 
+	    lastSlash > 0 ?
+	    new StringBuffer(td.substring(0,lastSlash+1) + 
+			     expandedName() + ";")
+	    : new StringBuffer("L" + expandedName() + ";");
+
+	return buf.toString();	
+    }
+    eq RawClassDecl.expandedTypeDescriptor() = genericDecl().expandedTypeDescriptor();
+    eq RawInterfaceDecl.expandedTypeDescriptor() = genericDecl().expandedTypeDescriptor();
+    eq TypeVariable.expandedTypeDescriptor() = getID();
+
+    syn lazy String TypeDecl.expandedName() = name();
+    eq ParTypeDecl.expandedName() {
+	StringBuffer buf = new StringBuffer("$$");
+	buf.append(name());
+	// $$L$$ for <
+	buf.append("$$L$$");
+	for ( int i=0; i<getNumArgument(); i++ ) {
+	    TypeDecl argType = getArgument(i).type();
+	    buf.append(TypeDecl.convertToExpandedName(argType.expandedConstantPoolName()));
+	    buf.append("$$C$$");
+	}	
+	// $$R$$ for >
+	buf.append("$$R$$");
+	return buf.toString();
+    }
+    eq RawClassDecl.expandedName() {
+	throw new Error("Classes with reflective declarations cannot be " +
+			"raw types.");
+    }
+    eq RawInterfaceDecl.expandedName() {
+	throw new Error("Interfaces with reflective declarations cannot be " +
+			"raw types.");
+    }
+    // $$S$$ for /
+    protected static String TypeDecl.convertToExpandedName ( String n ) {
+	return n.replace("/", "$$S$$");
+    }
+
+    // TODO: not finished.
+    syn lazy TypeDecl BodyDecl.parseConstantPoolName(String n) {
+	// Package and Type Name
+	StringBuffer packageName = new StringBuffer();
+	
+	int i, last = 0;
+	while( (i = n.indexOf("/", last)) > 0 ) {
+	    if ( last > 0 )
+		packageName.append(".");
+	    packageName.append(n.substring(last, i));
+	    last = i+1;
+	}
+
+	// what's left is the type name.
+	String typeName = n.substring(last);
+
+	TypeDecl t = null;
+
+	StringBuffer tnBuf = new StringBuffer(typeName);
+	Access a = Signatures.eatTypeName(packageName.toString(), tnBuf);
+	while ( tnBuf.length() > 0 )
+	  a = a.qualifiesAccess(Signatures.eatTypeName("", tnBuf));
+	t = retrieveType(a);
+
+	return t;
+    }
+    eq StaticForMethodDeclSubstituted.parseConstantPoolName(String n) = original.parseConstantPoolName(n);
+    eq FieldDeclarationSubstituted.parseConstantPoolName(String n) = getOriginal().parseConstantPoolName(n);
+    eq MethodDeclSubstituted.parseConstantPoolName(String n) = getOriginal().parseConstantPoolName(n);
+    //    eq ExpandedMethodDecl.parseConstantPoolName(String n) = original.parseConstantPoolName(n);
+    eq ConstructorDeclSubstituted.parseConstantPoolName(String n) = getOriginal().parseConstantPoolName(n);
+    
+    syn lazy TypeDecl BodyDecl.retrieveType(Access ta) {
+	this.addChild(ta);
+	TypeDecl t = ta.type();
+	
+	this.children[numChildren-1] = null;
+	this.numChildren = numChildren-1;
+	return t;
+    }
+    syn lazy TypeDecl StaticForStmt.retrieveType(Access ta) {
+	// TODO: total hack! getting around JastAdd's tree-based type lookup
+	// ta must be coming from a statement child of StaticForStmt.
+	this.addStmt(new ExprStmt(ta));
+	TypeDecl t = ta.type();
+
+	this.getStmtList().removeChild(getNumStmt()-1);
+	return t;
+    }
+
+    eq ConstructorDeclSubstituted.retrieveType(Access ta) = getOriginal().retrieveType(ta);
+    eq MethodDeclSubstituted.retrieveType(Access ta) = getOriginal().retrieveType(ta);
+    //    eq ExpandedMethodDecl.retrieveType(Access ta) = original.retrieveType(ta);
+    eq FieldDeclarationSubstituted.retrieveType(Access ta) = getOriginal().retrieveType(ta);
+    eq StaticForMethodDeclSubstituted.retrieveType(Access ta) = original.retrieveType(ta);
+
+    syn lazy boolean BodyDecl.isSubstitutedDecl() = false;
+    eq FieldDeclarationSubstituted.isSubstitutedDecl() = true;
+    eq MethodDeclSubstituted.isSubstitutedDecl() = true;
+    eq ConstructorDeclSubstituted.isSubstitutedDecl() = true;
+
+    
+}

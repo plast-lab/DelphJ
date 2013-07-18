@@ -1,0 +1,5 @@
+aspect MJVariableDeclaration {
+    eq PatternFieldDeclaration.isInstanceVariable() =
+	(hostType().isClassDecl() || hostType().isAnonymous() )
+	&& !getModifiers().possiblyStatic();
+}

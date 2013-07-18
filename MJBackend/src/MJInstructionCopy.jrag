@@ -1,0 +1,278 @@
+import org.objectweb.asm.tree.*;
+import org.objectweb.asm.*;
+
+aspect MJInstructionCopy {    
+
+    // Copies the instructions from method between two byte positions.
+    public class InsnCopyVisitor extends org.objectweb.asm.MethodAdapter {
+	public InsnList instructions = new InsnList();
+	java.util.List tryCatchBlocks = new java.util.ArrayList();
+	java.util.List localVariables = new java.util.ArrayList();
+
+	int bytebegin = 0;
+	int byteend = 0;
+	int currByte = 0;
+
+	// corresponding actual instruction index of begin and end.
+	int instr_begin = -1;
+	int instr_end = -1;
+	int instr_count = 0;
+
+	// this variable is set if we are visiting instructions to be replicated for
+	// staticForStmt, within md.
+	StaticForStmt staticForStmt;
+	public InsnCopyVisitor(MethodVisitor mv, 
+				    int begin, int end) {
+	    super(mv);
+	    bytebegin = begin;
+	    byteend = end;
+	}
+
+	void updateTableBytepos( int min, int max ) {
+	    // skips 0 to 3 padding bytes*
+	    currByte = currByte + 4 - (currByte & 3);
+	    currByte += 12; // for min/max.
+	    currByte += (max-min+1)*4;
+	    /*
+	      currByte += 12;
+	      for (; j > 0; --j) {
+	      readLabel(w + readInt(currByte), labels);
+	      currByte += 4;
+	      }*/
+	}
+	void updateLookupBytepos ( int keys ) {
+	    // skips 0 to 3 padding bytes*
+	    currByte = currByte + 4 - (currByte & 3);
+	    // reads instruction
+	    currByte += 8;
+
+	    currByte += (keys+1)*8;
+
+	    /*
+	    for (; j > 0; --j) {
+	    readLabel(w + readInt(currByte + 4), labels);
+	    currByte += 8;
+	    }*/
+	}
+	void updateByteposition ( int opcode ) {
+	    switch (TYPE[opcode]) {
+	    case NOARG_INSN:
+	    case IMPLVAR_INSN:
+		currByte += 1;
+		break;
+	    case LABEL_INSN:
+		currByte += 3;
+		break;
+	    case LABELW_INSN:
+		currByte += 5;
+		break;
+	    case WIDE_INSN:
+		//		opcode = b[currByte + 1] & 0xFF;
+		if (opcode == Opcodes.IINC) {
+		    currByte += 6;
+		} else {
+		    currByte += 4;
+		}
+		break;
+	    case TABL_INSN:
+		throw new Error("TABLE_INSN should explicitly call updateByteposition with min and max of table");
+	    case LOOK_INSN:
+		throw new Error("LookupSwitch should explicitly call updateByteposition with keys (number of keys)");
+	    case VAR_INSN:
+	    case SBYTE_INSN:
+	    case LDC_INSN:
+		currByte += 2;
+		break;
+	    case SHORT_INSN:
+	    case LDCW_INSN:
+	    case FIELDORMETH_INSN:
+	    case TYPE_INSN:
+	    case IINC_INSN:
+		currByte += 3;
+		break;
+	    case ITFMETH_INSN:
+		currByte += 5;
+		break;
+		// case MANA_INSN:
+	    default:
+		currByte += 4;
+		break;
+	    }
+	}
+
+	void addInstruction (AbstractInsnNode n ) {
+	    instr_count++;
+	    if ( instructionInRange()) {
+		instructions.add(n);
+		if ( instr_begin == -1 ) {
+		    // if this is the first instruction in the range,
+		    // set the actual begin index of instruction list
+		    // to the current index.
+		    instr_begin = instr_count;
+		}
+	    } else if ( instr_end == -1 && instr_begin > -1 ) {
+		// if this is the first instruction outside of the end,
+		// set the end index to the size of the current instruction list.
+		instr_end = instr_count;
+	    }
+	    
+	    if ( n.getOpcode() != -1 )
+		updateByteposition(n.getOpcode());
+	}
+	boolean instructionInRange() { 
+	    return currByte >= bytebegin && currByte < byteend ; 
+	}
+
+	public void visitFieldInsn(int opcode, String owner, String name, String desc) {
+	    addInstruction(new FieldInsnNode(opcode, owner,name, desc));
+	}
+
+	public void visitIincInsn(int var, int increment) {
+	    addInstruction(new IincInsnNode(var, increment));
+	}
+
+	public void visitInsn(int opcode) {
+	    addInstruction(new InsnNode(opcode));
+	}
+
+	public void visitIntInsn(int opcode, int operand) {
+	    addInstruction(new IntInsnNode(opcode, operand));
+	}
+
+	public void visitJumpInsn(int opcode, Label label) {
+	    addInstruction(new JumpInsnNode(opcode, new LabelNode(label)));
+	}
+
+	public void visitLabel(Label label) {
+	    addInstruction(new LabelNode(label));
+	}
+	
+	public void visitLdcInsn(Object cst) {
+	    addInstruction(new LdcInsnNode(cst));
+	}
+
+	public void visitLineNumber(int line, Label start) {
+	    addInstruction(new LineNumberNode(line, new LabelNode(start)));
+	}
+
+	public void visitLocalVariable(String name,String desc,String signature,Label start,Label end,int index) {
+	    localVariables.add(new LocalVariableNode(name, desc, signature,
+						     new LabelNode(start),
+						     new LabelNode(end), 
+						     index));
+	}
+
+	public void visitLookupSwitchInsn(Label dflt, int[] keys, Label[] labels) {
+	    int[] newKeys = new int[keys.length];
+	    for ( int i=0; i<keys.length; i++)
+		newKeys[i] = keys[i];
+
+	    if ( instructionInRange()) {
+		instructions.add(new LookupSwitchInsnNode(new LabelNode(dflt), 
+							  newKeys, 
+							  makeLabelArray(labels)));
+		if ( instr_begin == -1 ) {
+		    // if this is the first instruction in the range,
+		    // set the actual begin index of instruction list
+		    // to the current index.
+		    instr_begin = instr_count-1;
+		}
+	    } else if ( instr_end == -1 && instr_begin > -1 ) {
+		// if this is the first instruction outside of the end,
+		// set the end index to the size of the current instruction list.
+		instr_end = instr_count;
+	    }
+	    
+	    updateLookupBytepos(keys.length);
+	}
+	
+	public void visitMethodInsn(final int opcode,
+				    final String owner,
+				    final String name,
+				    final String desc) {
+	    addInstruction(new MethodInsnNode(opcode, owner,name, desc));
+	}
+	
+	public void visitMultiANewArrayInsn(String desc, int dims) {
+	    addInstruction(new MultiANewArrayInsnNode(desc, dims));
+	}
+
+	public void visitTableSwitchInsn(int min, int max, Label dflt, Label[] labels) {
+	    instr_count++;
+	    if ( instructionInRange()) {
+		instructions.add(new TableSwitchInsnNode(min, max, new LabelNode(dflt), makeLabelArray(labels)));
+		if ( instr_begin == -1 ) {
+		    // if this is the first instruction in the range,
+		    // set the actual begin index of instruction list
+		    // to the current index.
+		    instr_begin = instr_count;
+		}
+	    } else if ( instr_end == -1 && instr_begin > -1 ) {
+		// if this is the first instruction outside of the end,
+		// set the end index to the size of the current instruction list.
+		instr_end = instr_count;
+	    }
+
+	    updateTableBytepos(min, max);
+	}
+
+	public void visitTypeInsn(int opcode, String type) {
+	    // parse type to see whether it needs to be replaced with
+	    // expanded type name.	    
+	    addInstruction(new TypeInsnNode(opcode, type));
+	}
+
+	public void visitVarInsn(int opcode, int var) {
+	    addInstruction(new VarInsnNode(opcode,var));
+	}
+	
+	public void visitTryCatchBlock(Label start, Label end, Label handler, String type) {
+	    tryCatchBlocks.add(new TryCatchBlockNode(new LabelNode(start), new LabelNode(end), new LabelNode(handler), type));
+	}
+
+	private LabelNode[] makeLabelArray(Label[] labels) {
+	    LabelNode[] nodes = new LabelNode[labels.length];
+	    for ( int i=0; i<labels.length; i++) {
+		nodes[i] = new LabelNode(labels[i]);
+	    }
+	    return nodes;
+	}
+
+
+	static final int NOARG_INSN = 0;
+	static final int SBYTE_INSN = 1;
+	static final int SHORT_INSN = 2;
+	static final int VAR_INSN = 3;
+	static final int IMPLVAR_INSN = 4;
+	static final int TYPE_INSN = 5;
+	static final int FIELDORMETH_INSN = 6;
+	static final int ITFMETH_INSN = 7;
+	static final int LABEL_INSN = 8;
+	static final int LABELW_INSN = 9;
+	static final int LDC_INSN = 10;
+	static final int LDCW_INSN = 11;
+	static final int IINC_INSN = 12;
+	static final int TABL_INSN = 13;
+	static final int LOOK_INSN = 14;
+	static final int MANA_INSN = 15;
+	static final int WIDE_INSN = 16;
+
+	/**
+	 * The instruction types of all JVM opcodes.
+	 */
+	static final byte[] TYPE;
+
+	static {
+	    byte[] b = new byte[220];
+	    String s = 
+		"AAAAAAAAAAAAAAAABCKLLDDDDDEEEEEEEEEEEEEEEEEEEEAAAAAAAADD"
+                + "DDDEEEEEEEEEEEEEEEEEEEEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+                + "AAAAAAAAAAAAAAAAAMAAAAAAAAAAAAAAAAAAAAIIIIIIIIIIIIIIIIDNOAA"
+                + "AAAAGGGGGGGHAFBFAAFFAAQPIIJJIIIIIIIIIIIIIIIIII";
+	    for (int i = 0; i < b.length; ++i) {
+		b[i] = (byte) (s.charAt(i) - 'A');
+	    }
+	    TYPE = b;
+	}
+    }
+}

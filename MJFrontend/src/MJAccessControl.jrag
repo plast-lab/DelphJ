@@ -1,0 +1,79 @@
+aspect MJAccessControl {
+
+    public void ParTypeAccess.accessControl() {
+	super.accessControl();
+
+	// Check whether the instantiation would cause visibility of
+	// type arguments or their members to be changed.
+	for ( int i=0; i<getNumTypeArgument(); i++) {
+	    TypeDecl at = getTypeArgument(i).type();
+	    if ( !at.accessibleFrom(this.type())) {
+		// warn user.
+		warning(at.fullName() + 
+			" cannot be accessed from " +
+			toString() + ". Increasing " +
+			"visibility of " + at.fullName() + " to public, " +
+			"and package-protected members to protected.");
+	    }
+	}
+
+	// if one type argument is used as the super class, and the 
+	// argument final, then it's an error.
+	TypeDecl thisGD = genericDecl();
+	if ( !thisGD.isUnknown() && thisGD.isClassDecl()) {
+	    GenericClassDecl gcd = (GenericClassDecl) thisGD;
+	    if ( gcd.hasSuperclass() && gcd.superclass().isTypeVariable()) {
+		for ( int i=0; i<gcd.getNumTypeParameter(); i++) {
+		    if ( gcd.getTypeParameter(i) == gcd.superclass()) {
+			if ( getTypeArgument(i).type().isFinal()) {
+			    error(((ParClassDecl) type()).nameWithArgs() + 
+				  " declares final class " +
+				  getTypeArgument(i).type().fullName() + 
+				  " as a superclass.");
+			}
+			break;
+		    }
+		}
+	    }
+	}
+    }
+
+    eq PatternFieldDeclaration.accessibleFrom(TypeDecl type) {
+	if (!super.accessibleFrom(type))
+	    return false;
+
+	// check for the cases where modifiers may be private, protected, 
+	// or none.
+	//
+	// possbilyProtected --> hostPackage().equals(type.hostPackage() ||
+	//                       type.withinBodyThatSubclasses(hostType()) 
+	if( getModifiers().possiblyProtected() &&
+	    !hostPackage().equals(type.hostPackage()) &&
+	    type.withinBodyThatSubclasses(hostType()) == null )
+	    return false;
+
+	// possiblyPrivate --> hostType().typeLevelType() == type.topLevelType()
+	if ( getModifiers().possiblyPrivate() && 
+	     hostType().topLevelType() != type.topLevelType())
+	    return false;
+	
+	// TODO: no modifier at all needs to be handled.
+	//return hostPackage().equals(type.hostPackage());
+
+	return true;
+    }
+
+    refine AccessControl eq MethodDecl.accessibleFrom(TypeDecl type) {
+	if ( AccessControl.MethodDecl.accessibleFrom(type) )
+	    return true;
+
+	if (!isPrivate()) {
+	    if(hostPackage().equals(type.hostPackage()))
+		return true;
+	    if(type.withinBodyThatSubclasses(hostType()) != null)
+		return true;
+	    return false;
+	}
+	return false;
+    }
+}

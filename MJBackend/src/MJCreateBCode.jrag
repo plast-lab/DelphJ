@@ -1,0 +1,62 @@
+aspect MJCreateBCode {
+    public void StaticForStmt.createBCode(CodeGeneration gen) {
+	//	super.createBCode(gen);
+	// need to put attributes in the method about which bytes
+	// to replicate.
+
+	gen.addStaticForStmtBegin(getIteratorDecl()); //.signature());
+
+	for ( int i=0; i<getNumStmt(); i++) {
+	    try {
+		getStmt(i).createBCode(gen);
+	    } catch (Exception e) {
+		e.printStackTrace();
+		throw new Error("Error generating code for " + errorPrefix() + " " + getStmt(i));
+	    }
+	}
+
+	gen.addStaticForStmtEnd();
+    }
+
+    refine CreateBCode eq TypeDecl.needsAccessorFor(Variable v) {
+	if(!(v instanceof FieldDeclaration))
+	    return false;
+	FieldDeclaration f = (FieldDeclaration)v;
+	if(f.isConstant() && (f.type().isPrimitive() || f.type().isString()))
+	    return false;
+	return f.isPrivate() && !hasField(v.identifier());
+    }
+    
+    refine GenericsCodegen public void VarAccess.emitStore(CodeGeneration gen) {
+	Variable v = decl();
+	if(v instanceof FieldDeclaration) {
+	    FieldDeclaration f = (FieldDeclaration)v;
+	    f = f.erasedField();
+	    if(requiresAccessor())
+		f.createAccessorWrite(fieldQualifierType()).emitInvokeMethod(gen, fieldQualifierType());
+	    else
+		f.emitStoreField(gen, fieldQualifierType());
+	}
+	else {
+	    // from CodeGeneration.
+	    // have to copy it here to rewrite hasField 
+	    if(v instanceof VariableDeclaration) {
+		VariableDeclaration decl = (VariableDeclaration)v;
+		if(isDUbefore(v))
+		    gen.addLocalVariableEntryAtCurrentPC(decl.name(), decl.type().typeDescriptor(), decl.localNum(), decl.variableScopeEndLabel(gen));
+		decl.type().emitStoreLocal(gen, decl.localNum());
+	    }
+	    else if(v instanceof ParameterDeclaration) {
+		ParameterDeclaration decl = (ParameterDeclaration)v;
+		decl.type().emitStoreLocal(gen, decl.localNum());
+	    }
+	    else if(v instanceof FieldDeclaration) {
+		FieldDeclaration f = (FieldDeclaration)v;
+		if(f.isPrivate() && !hostType().hasField(v.identifier()))
+		    f.createAccessorWrite(fieldQualifierType()).emitInvokeMethod(gen, fieldQualifierType());
+		else
+		    f.emitStoreField(gen, fieldQualifierType());
+	    }
+	}
+    }
+}

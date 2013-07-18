@@ -1,0 +1,296 @@
+aspect MJPrettyPrint {
+
+    public void BoundTypeAccess.toString(StringBuffer s) {
+	TypeDecl td = getTypeDecl();
+	if ( td.isParameterizedType() )
+	    s.append(((ParTypeDecl) td).nameWithArgs());
+	    else
+	s.append(td.name());
+    }
+
+    refine GenericsPrettyPrint public void TypeVariable.toString(StringBuffer s) {
+	s.append(name());
+	if(getNumRealTypeBound() > 0) {
+	    s.append(" extends ");
+	    boolean first = true;
+	    s.append(getTypeBound(0).type().fullName());
+	    for(int i = 0; i < getNumTypeBound(); i++) {
+		if ( getTypeBound(i).addedByPatternRewrite()) 
+		    continue;
+		if ( !first ) s.append(" & ");
+		else first = false;
+
+		s.append(getTypeBound(i).type().fullName());
+	    }
+	}
+    }
+
+    public void StaticForStmt.toString(StringBuffer s) {
+	getIteratorDecl().toString(s);
+	s.append("{|\n");
+	for ( int i=0; i<getNumStmt(); i++) 
+	    getStmt(i).toString(s);
+	s.append("|}");
+    }
+
+    public void AllMatchingTypeVariable.toString(StringBuffer s) {
+    }
+
+    public int TypeVariable.getNumRealTypeBound() {
+	int realTypeBound = 0;
+	for ( int i=0; i<getNumTypeBound(); i++) {
+	    if (! getTypeBound(i).addedByPatternRewrite())
+		realTypeBound++;
+	}
+	return realTypeBound;
+    }
+
+    public int MethodPattern.getNumRealException() {
+	int realExp = 0;
+	for ( int i=0; i<getNumException(); i++) {
+	    if ( !getException(i).addedByPatternRewrite())
+		realExp++;
+	}
+	return realExp;
+    }
+
+    // these methods are used in error reporting.
+    public String MethodDecl.infoSignature() {
+	StringBuffer buf = new StringBuffer(indent());
+	buf.append(signature());
+	return buf.toString();
+    }
+    public String StaticForMethodDecl.infoSignature() {
+	StringBuffer buf = new StringBuffer();
+	getIteratorDecl().toString(buf);
+	buf.append("\n");
+	buf.append(indent());
+	buf.append(type().name() + " " + super.signature());
+	return buf.toString();
+    }
+
+    public void StaticForFieldDeclaration.toString(StringBuffer buf) {
+	getIteratorDecl().toString(buf);
+	buf.append("\n");
+	super.toString(buf);
+    }
+
+    public String FieldDeclaration.infoSignature() { 
+	StringBuffer sb = new StringBuffer();
+	toString(sb);
+	return sb.toString();
+    }
+
+    public void StaticForMethodDecl.toString(StringBuffer buf) {
+	getIteratorDecl().toString(buf);
+	buf.append("\n");
+	super.toString(buf);
+    }
+
+    public int IteratorDecl.getNumRealPatternTypeParameter() {
+	int r = 0;
+	for ( int i=0; i<getNumPatternTypeParameter(); i++) {
+	    if ( getPatternTypeParameter(i).addedByPatternRewrite())
+		continue;
+	    r++;
+	}
+	return r;
+    }
+
+    public void IteratorDecl.toString(StringBuffer buf) {
+	buf.append(indent());
+	if ( getNumRealPatternTypeParameter() > 0 ) {
+	    buf.append("<");
+	    int i=0;
+	    for ( i=0 ; i<getNumPatternTypeParameter(); i++) {
+		if ( getPatternTypeParameter(i).addedByPatternRewrite())
+		    continue;
+		getPatternTypeParameter(i).toString(buf);
+		i++;
+		break;
+	    }
+	    for ( ; i<getNumPatternTypeParameter(); i++) {
+		if ( getPatternTypeParameter(i).addedByPatternRewrite())
+		    continue;
+
+		buf.append(",");
+		getPatternTypeParameter(i).toString(buf);
+	    }
+	    buf.append(">");
+	}
+	if ( getNumPatternNameParameter() > 0) {
+	    buf.append("[");
+	    for ( int i=0; i<getNumPatternNameParameter(); i++) {
+		if ( i>0) buf.append(",");
+		getPatternNameParameter(i).toString(buf);
+	    }
+	    buf.append("]");
+	}
+	buf.append("for( ");
+	getPattern().toString(buf);
+	for ( int i=0; i<getNumNestedPattern(); i++) {
+	    getNestedPattern(i).toString(buf);
+	}
+	buf.append(")");
+    }
+    public void PatternNameVariable.toString(StringBuffer buf) {
+	buf.append(getID());
+    }
+
+    public void EmptyPrimaryPattern.toString(StringBuffer buf) {}
+
+    public void MethodPattern.toString(StringBuffer buf) {
+	getModifiers().toString(buf);
+	if ( !getTypeAccess().addedByPatternRewrite()) {
+	    getTypeAccess().toString(buf);
+	    buf.append(" ");
+	}
+
+	buf.append(getID());
+	buf.append("(");
+	for ( int i=0; i<getNumParameter(); i++) {
+	    if ( i > 0 ) buf.append(", ");
+	    getParameter(i).toString(buf);
+	}
+	buf.append(")");
+	if ( getNumRealException() > 0 ) {
+	    buf.append(" throws ");
+	    int i=0;
+	    for ( i=0; i<getNumException(); i++) {
+		if ( getException(i).addedByPatternRewrite()) continue;
+		getException(i).toString(buf);
+		i++;
+		break;
+	    }
+	    for ( ; i<getNumException(); i++)  {
+		if ( getException(i).addedByPatternRewrite()) continue;
+		buf.append(",");
+		getException(i).toString(buf);
+	    }
+	}
+	buf.append(":");
+	getBaseSet().toString(buf);
+	buf.append(";");
+    }
+    public void NestedMethodPattern.toString(StringBuffer buf) {
+	if ( getIsErrorCondition())
+	    buf.append("error ");
+
+	if ( getIsPositive()) buf.append("some ");
+	else buf.append("no ");
+
+	getModifiers().toString(buf);
+	if ( !getTypeAccess().addedByPatternRewrite()) {
+	    getTypeAccess().toString(buf);
+	    buf.append(" ");
+	}
+
+	buf.append(getID());
+	buf.append("(");
+	for ( int i=0; i<getNumParameter(); i++) {
+	    if ( i > 0 ) buf.append(", ");
+	    getParameter(i).toString(buf);
+	}
+	buf.append(")");
+
+	if ( getNumRealException() > 0 ) {
+	    buf.append(" throws ");
+	    int i=0;
+	    for ( i=0; i<getNumException(); i++) {
+		if ( getException(i).addedByPatternRewrite()) continue;
+		getException(i).toString(buf);
+		break;
+	    }
+	    for ( ; i<getNumException(); i++)  {
+		if ( getException(i).addedByPatternRewrite()) continue;
+		buf.append(",");
+		getException(i).toString(buf);
+	    }
+	}
+	buf.append(":");
+	getBaseSet().toString(buf);
+	buf.append(";");
+    }
+    public void FieldPattern.toString(StringBuffer buf) {
+	getModifiers().toString(buf);
+	if ( !getTypeAccess().addedByPatternRewrite()) {
+	    getTypeAccess().toString(buf);
+	    buf.append(" ");
+	}
+	buf.append(getID());
+	buf.append(":");
+	getBaseSet().toString(buf);
+	buf.append(";");
+    }
+    public void NestedFieldPattern.toString(StringBuffer buf) {
+	if ( getIsErrorCondition())
+	    buf.append("error ");
+
+	if ( getIsPositive()) buf.append("some ");
+	else buf.append("no ");
+
+	getModifiers().toString(buf);
+	if ( !getTypeAccess().addedByPatternRewrite()) {
+	    getTypeAccess().toString(buf);
+	    buf.append(" ");
+	}
+	buf.append(getID());
+	buf.append(":");
+	getBaseSet().toString(buf);
+	buf.append(";");
+    }
+    public void TrueNestedPattern.toString(StringBuffer buf) {}
+
+    public void BaseSet.toString(StringBuffer buf) {
+	getTypeAccess().toString(buf);
+	buf.append(".");
+	buf.append(getRefElmt().getElmtName());
+    }
+
+    public void NegativeModifier.toString(StringBuffer buf) {
+	buf.append("!");
+	buf.append(getID());
+    }
+
+    public void PrimitiveType.toString(StringBuffer buf) {
+	buf.append(name());
+    }
+
+    public void PatternTypeVariable.toString(StringBuffer buf) {
+	buf.append(name());
+	boundsToString(buf);
+    }
+
+    public void VectorTypeVariable.toString(StringBuffer buf) {
+	buf.append(name() + "*");
+	boundsToString(buf);
+    }
+
+    public void PatternTypeVariable.boundsToString(StringBuffer buf) {
+	if ( getNumRealTypeBound() > 0 ) {
+	    buf.append(" extends ");
+	    int i;
+	    for ( i=0; i<getNumTypeBound(); i++) {
+		if ( getTypeBound(i).addedByPatternRewrite())
+		    continue;
+		buf.append(getTypeBound(i).type().fullName());
+		i++;
+		break;
+	    }
+	    for ( ; i<getNumTypeBound(); i++) {
+		if ( getTypeBound(i).addedByPatternRewrite())
+		    continue;
+		buf.append(" & ");
+		buf.append(getTypeBound(i).type().fullName());
+	    }
+	}
+    }
+
+
+    public void ParInterfaceDecl.toString(StringBuffer s) {
+	s.append(nameWithArgs());
+    }
+    refine GenericsPrettyPrint public void ParClassDecl.toString(StringBuffer s) {
+	s.append(nameWithArgs());
+    }
+}

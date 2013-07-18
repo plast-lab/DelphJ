@@ -1,0 +1,228 @@
+aspect MJExpansionProperties {
+    public Map BodyDecl.expansionSubstitutions = new HashMap();
+    public Parameterization BodyDecl.parameterizedBy = null;
+
+    public StaticForConstructorDecl StaticForConstructorDeclSubstituted.original = null;
+    public StaticForFieldDeclaration StaticForFieldDeclarationSubstituted.original = null;
+    public StaticForMethodDecl StaticForMethodDeclSubstituted.original = null;
+
+    public interface SubstitutedStaticForDeclaration {
+	StaticForDeclaration getOriginal();
+    }
+    public StaticForDeclaration StaticForMethodDeclSubstituted.getOriginal() { return original; }
+    public StaticForDeclaration StaticForConstructorDeclSubstituted.getOriginal() { return original; }
+    public StaticForDeclaration StaticForFieldDeclarationSubstituted.getOriginal() { return original; }
+    public StaticForDeclaration SubstitutedStaticForStmt.getOriginal() { return original; }
+
+    syn lazy boolean BodyDecl.isSubstitutedStaticForDecl() { return false; }
+    public boolean SubstitutedStaticForDeclaration.isSubstitutedStaticForDecl() { return true; }
+    
+    StaticForMethodDeclSubstituted implements SubstitutedStaticForDeclaration;
+    StaticForConstructorDeclSubstituted implements SubstitutedStaticForDeclaration;
+    StaticForFieldDeclarationSubstituted implements SubstitutedStaticForDeclaration;
+    SubstitutedStaticForStmt implements SubstitutedStaticForDeclaration;
+
+    //    public boolean TypeDecl.expansionAttribute = false;
+
+    syn lazy boolean TypeDecl.grounded() circular [false] = true;
+    /**
+     * A ParTypeDecl is completely grounded if all of its arguments
+     * are completely grounded.
+     **/
+    eq ParTypeDecl.grounded() {
+	for ( int i=0; i<getNumArgument(); i++) {
+	    if ( !getArgument(i).type().grounded())
+		return false;
+	} 
+	return true;
+    }
+    eq TypeVariable.grounded() = false;
+    eq UnknownType.grounded() = false;
+
+    /**
+     * A TypeDecl needs expansion if:
+     * - it contains a reflective declaration block
+     * - it refers to types that needs expansion but cannot be expanded
+     *   i.e. is instantiated with at least one of its type parameters.
+     **/
+    syn boolean ASTNode.needsExpansion() circular [false] {
+	for ( int i=0; i<getNumChild(); i++) {
+	    if ( getChild(i).needsExpansion())
+		return true;
+	}
+	return false;
+    }
+    eq TypeDecl.needsExpansion() {
+	//	if ( !compilationUnit().fromSource()) return expansionAttribute;
+	if ( this.isObject()) return false;
+
+	// check all body decls.
+	for ( int i=0; i<getNumBodyDecl(); i++) {
+	    if ( getBodyDecl(i).needsExpansion()) 
+		return true;
+	}
+	return false;
+    }
+    eq ClassDecl.needsExpansion() {
+	if ( super.needsExpansion()) return true;
+
+	// TODO: there appears to be a bug is inCircular. An innerclass's
+	// superclass's qualifier may not be a type access: e.g.
+	// ListItr's superclass Itr has qualifier AbstractCollection<E>,
+	// which has type ParTypeAccess, which is not a TypeAccess.
+	// Look into this.
+	// For now, we only inspect non-nested classes.
+	if ( isInnerClass()) return false;
+
+	// check whether superclass and interfaces needs expansion
+	if ( hasSuperclass() && 
+	     superclass().needsExpansion() && !superclass().grounded())
+	    return true;
+	for ( Iterator ifIt = interfacesIterator(); ifIt.hasNext(); ) {
+	    TypeDecl iface = (TypeDecl) ifIt.next();
+	    if ( iface.needsExpansion() && !iface.grounded())
+		return true;
+	}
+	return false;
+    }
+    eq InterfaceDecl.needsExpansion() {
+	if ( super.needsExpansion()) return true;
+	for ( Iterator ifIt = superinterfacesIterator(); ifIt.hasNext(); ) {
+	    TypeDecl iface = (TypeDecl) ifIt.next();
+	    if ( iface.needsExpansion() && !iface.grounded())
+		return true;
+	}
+	return false;
+    }
+
+    // ParTypeDecl needs expansion if
+    // 1. generic type needs expansion, i.e. uses type variable in
+    //    static for or supertypes. AND
+    //    at least one of the type arguments cannot be expanded.
+    //    OR
+    // 2. generic type does not need expansion, but one of the
+    //    type arguments need expansion.
+    eq ParTypeDecl.needsExpansion() {
+	// check whether the generic decl needs expansion.
+	if ( genericDecl().needsExpansion()) {
+	    for ( int i=0; i<getNumArgument(); i++) {
+		if ( !getArgument(i).type().grounded())
+		    return true;
+	    }
+	} else {
+	    // check whether any of the type arguments needs expansion.
+	    for ( int i=0; i<getNumArgument(); i++) {
+		if ( getArgument(i).type().needsExpansion() )
+		    return true;
+	    }
+	}
+	return false;
+    }
+    eq RawClassDecl.needsExpansion() = false;
+    eq RawInterfaceDecl.needsExpansion() = false;
+    eq TypeVariable.needsExpansion() = enclosingType().needsExpansion();
+    eq ArrayDecl.needsExpansion() = elementType().needsExpansion();
+    eq PrimitiveType.needsExpansion() = false;
+    eq NullType.needsExpansion() = false;
+    eq AbstractWildcardType.needsExpansion() = false;
+    // TODO: Not sure if this entirely works, but since needsExpansion
+    // is based upon looking up base set's type, which can be a type
+    // parameter. But the type parameter is not visible to static method
+    // UNLESS the class is expanded, an UnknownType needs to be set to
+    // expandable for this circular computation to work.
+    // I don't think it has any harm -- SSH
+    eq UnknownType.needsExpansion() = true;
+
+    eq MethodDecl.needsExpansion() {
+	// check return type.
+	if ( type().needsExpansion()) return true;
+	// check parameters.
+	for ( int i=0; i<getNumParameter(); i++) {
+	    if ( getParameter(i).type().needsExpansion())
+		return true;
+	}
+	// check exception.
+	for ( int i=0; i<getNumException(); i++) {
+	    if ( getException(i).type().needsExpansion())
+		return true;
+	}
+	// check body
+	if ( hasBlock())
+	    return getBlock().needsExpansion();
+	return false;
+    }
+    eq StaticForMethodDecl.needsExpansion() {
+	if ( getIteratorDecl().needsExpansion()) return true;
+	return super.needsExpansion();
+    }
+    eq StaticForConstructorDecl.needsExpansion() {
+	if ( getIteratorDecl().needsExpansion()) return true;
+	return super.needsExpansion();
+    }
+    eq StaticForFieldDeclaration.needsExpansion() {
+	if ( getIteratorDecl().needsExpansion()) return true;
+	return super.needsExpansion();
+    }
+    eq StaticForStmt.needsExpansion() {
+	if ( getIteratorDecl().needsExpansion()) return true;
+	return super.needsExpansion();
+    }
+    eq IteratorDecl.needsExpansion() {
+	if ( getPattern().needsExpansion()) return true;
+	for ( int i=0; i<getNumNestedPattern(); i++)
+	    if ( getNestedPattern(i).needsExpansion())
+		return true;
+	return false;
+    }
+    eq Pattern.needsExpansion() {
+	TypeDecl baseType = getBaseSet().getTypeAccess().type();
+	return baseType.isTypeVariable() || 
+	    (baseType.needsExpansion() && !baseType.grounded());
+    }
+    eq TrueNestedPattern.needsExpansion() = false;
+    eq EmptyPrimaryPattern.needsExpansion() = false;
+
+    eq Block.needsExpansion() {
+	// check all statements.
+	for ( int i=0; i<getNumStmt(); i++) {
+	    if ( getStmt(i).needsExpansion())
+		return true;
+	}
+	return false;
+    }
+    
+    eq TypeAccess.needsExpansion() = type().needsExpansion() && !type().grounded();
+
+    syn lazy boolean StaticForMethodDecl.expandable() = getIteratorDecl().expandable();
+    syn lazy boolean StaticForFieldDeclaration.expandable() = getIteratorDecl().expandable();
+    syn lazy boolean StaticForConstructorDecl.expandable() = getIteratorDecl().expandable();
+    syn lazy boolean StaticForStmt.expandable() = getIteratorDecl().expandable();
+
+    syn lazy boolean IteratorDecl.expandable() {
+	if ( !getPattern().expandable()) return false;
+	for ( int i=0; i<getNumNestedPattern(); i++)
+	    if ( !getNestedPattern(i).expandable()) return false;
+	return true;
+    }
+    syn lazy boolean Pattern.expandable() = getBaseSet().type().grounded();
+    eq TrueNestedPattern.expandable() = true;
+    eq EmptyPrimaryPattern.expandable() = true;
+
+
+    syn lazy boolean TypeDecl.shouldErase() = true;
+    eq GenericTypeDecl.shouldErase() = !needsExpansion();
+    eq ParTypeDecl.shouldErase() {
+	if ( !genericDecl().shouldErase() ) return false;
+	/*
+	for ( int i=0; i<getNumArgument(); i++) {
+	    if ( !getArgument(i).type().shouldErase())
+		return false;
+		}*/
+	return true;
+    }
+    eq TypeVariable.shouldErase() = enclosingType().shouldErase();
+    eq ArrayDecl.shouldErase() = componentType().shouldErase();
+    
+    syn lazy boolean BodyDecl.shouldErase() = hostType().shouldErase();
+}
+

@@ -1,0 +1,3 @@
+aspect MJTransformation {
+    public void IteratorDecl.transformation() {}
+}

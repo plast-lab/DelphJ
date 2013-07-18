@@ -1,0 +1,40 @@
+aspect MJQualifiedNames {
+
+    public Access GenericTypeDecl.createQualifiedAccess () {
+	if(isLocalClass() || isAnonymous()) {
+	    return new TypeAccess(name());
+	}
+	else if(!isTopLevelType()) {
+	    return enclosingType().createQualifiedAccess().qualifiesAccess(new TypeAccess(name()));
+	}
+	else if ( needsExpansion()) {
+	    List argList = new List();
+	    List parmList = getTypeParameterList();
+	    for ( int i=0; i<parmList.getNumChild(); i++)
+		argList.addChild(((TypeVariable) parmList.getChild(i)).createBoundAccess());
+	    return new ParTypeAccess(new TypeAccess(packageName(), name()),
+				     argList);
+	} else 
+	    return new TypeAccess(packageName(), name());
+    }
+
+    public Access GenericTypeDecl.createNoParamQualifiedAccess () {
+	return super.createQualifiedAccess();
+    }
+
+
+    refine Generics public Access ParTypeDecl.substitute(Parameterization parTypeDecl) {
+	// TODO: include nesting as well....
+	if(parTypeDecl.isRawType())
+	    return ((GenericTypeDecl)genericDecl()).rawType().createBoundAccess();
+	if(!usesTypeVariable())
+	    return super.substitute(parTypeDecl);
+	List list = new List();
+	for(int i = 0; i < getNumArgument(); i++)
+	    list.add(getArgument(i).type().substitute(parTypeDecl));
+
+	// modified: genericDecl.createQualifiedaccess now returns
+	// ParTypeAccess if it is an expandable type.
+	return new ParTypeAccess(((GenericTypeDecl) genericDecl()).createNoParamQualifiedAccess(), list);
+  }
+}
