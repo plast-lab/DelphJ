@@ -215,7 +215,8 @@ aspect DJRewrites {
 	    // present only/always inside a method declaration.
 	    if (enclosingBodyDecl() instanceof MethodDecl) {
 		// construct array of .class for method lookup
-		arrayInitList.addInit(new Dot(new TypeAccess(Program.DelphJRuntimePackage, Program.DelphJRuntimeClass),
+		arrayInitList.addInit(new Dot(new TypeAccess(Program.DelphJRuntimePackage, 
+							     Program.DelphJRuntimeClass),
 					      new ClassAccess()));
 	    }
 			
@@ -225,7 +226,8 @@ aspect DJRewrites {
 	    }
 
 	    Opt<ArrayInit> classArrayInit = new Opt<ArrayInit>(arrayInitList);
-	    ArrayCreationExpr classArrayCreationExpr = new ArrayCreationExpr(new ArrayTypeAccess(new TypeAccess("Class")), classArrayInit);
+	    ArrayCreationExpr classArrayCreationExpr = 
+		new ArrayCreationExpr(new ArrayTypeAccess(new TypeAccess("Class")), classArrayInit);
 
 	    argumentList.add(classArrayCreationExpr);
 
@@ -267,9 +269,8 @@ aspect DJRewrites {
 	// method, wire the new rewritten node and then cast the result.
 	when(!duringSyntacticClassification() && 
 	     isFieldAccess() && 
-	     //!isThisAccess() &&
 	     canBeRewritten() && 
-	     isDest() && 
+	     isMethodAccess() && 
 	     leftSide().isVariable())
 	    to Access {
 	    VarAccess var = (VarAccess) leftSide();
@@ -286,7 +287,7 @@ aspect DJRewrites {
 		Expr previousExpr = var.prevExpr(); // previousExpr := ((C)c.getData()) remaining := c1.b1
 
 		ParExpr result = new ParExpr(new Dot(new Dot(previousExpr, var), 
-						     new MethodAccess(Program.GetDataMethodName, new List<Expr>())));
+				 		     new MethodAccess(Program.GetDataMethodName, new List<Expr>())));
 
 		nestedCastInParenthesis = new ParExpr(new CastExpr(accessOfVar, result));
 

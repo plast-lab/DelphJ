@@ -9,7 +9,7 @@ class TestDispatch {
 		C c = new C();
 
 		//b.getData().b1 = a;
-		//b.b1 = a; 
+		b.b1 = a; 
 
 		//c.getData().c1.getData().b1 = a;
 		
@@ -17,7 +17,7 @@ class TestDispatch {
 		//B tmp2 = (B) (tmp1.c1.getData());
 		//A tmp3 = (A) (tmp2.b1);
 		//a = tmp3;
-		c.c1.b1 = a; 
+		//c.c1.b1 = a; 
 
 		//String result = b.b1.meth1("lala", 10);
 
