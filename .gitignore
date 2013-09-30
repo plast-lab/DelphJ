@@ -4,3 +4,17 @@
 *.jar
 *.war
 *.ear
+
+# Various #
+.emacs.desktop*
+
+# Project Specifics #
+Generated.java
+MJBackend/src/AST/
+MJBackend/src/beaver/
+MJBackend/src/parser/
+MJBackend/src/scanner/
+MJFrontend/src/AST/
+MJFrontend/src/beaver/
+MJFrontend/src/parser/
+MJFrontend/src/scanner/
