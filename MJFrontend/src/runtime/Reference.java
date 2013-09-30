@@ -108,13 +108,14 @@ public class Reference<T> implements IReference<T>, Cloneable {
 		IReference<C> c = tmp11;
 
 		// Generated from: b.b1 = a;
-        b.getData().b1 = a;
+        (B)(b.getData())).b1 = a;
 
 		// Generated from: String result = b.b1.meth1("Test String.", 10);
 		final IReference<B> tmp5 		= b.loadField("b1");
 		final IReference<String> tmp6 	= new Reference<String>("Test String.", null);
 		final IReference<Integer> tmp7 	= new Reference<Integer>(10, null);
-		IReference<String> result = tmp5.invoke("meth1", 
+		IReference<String> result = 
+			tmp5.invoke("meth1", 
 					new Class[]  { IReference.class, IReference.class, IReference.class }, 
 					new Object[] { tmp5, tmp6, tmp7 });
 
@@ -122,11 +123,12 @@ public class Reference<T> implements IReference<T>, Cloneable {
         System.out.println("Result is " + result.getData());
 
 		// Generated from: result = c.meth1(b);
-		final IReference<C> tmp12 		= c;
-		final IReference<B> tmp13 		= new Reference<B>(b.getData(), b);
-		result = tmp12.invoke("meth1", 
-					new Class[]  { IReference.class, IReference.class}, 
-					new Object[] { tmp12, tmp13 });
+		final IReference<C> tmp12 = c;
+		final IReference<B> tmp13 = new Reference<B>(b.getData(), b);
+		result  = 
+			tmp12.invoke("meth1", 
+				new Class[]  { IReference.class, IReference.class}, 
+				new Object[] { tmp12, tmp13 });
 
 		// Generated from: System.out.println("Result is " + result);
         System.out.println("Result is " + result.getData());     
