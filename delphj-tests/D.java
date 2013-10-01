@@ -1,10 +1,9 @@
+public class D {
 
-public class D<T> {
+    public subobject Integer five = new Integer(5);
+    public subobject Integer six = new Integer(6);
 
-	public subobject Integer five = new Integer(5);
-	public subobject Integer six = new Integer(6);
-
-	D (){
-
-	}
+    void meth (){
+	Integer val = five;
+    }
 } 

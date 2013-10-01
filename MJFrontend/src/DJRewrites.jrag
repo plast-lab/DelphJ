@@ -9,107 +9,6 @@ aspect DJRewrites {
     public static String Program.GetDataMethodName	= "getData";
 
 
-    // By not implementing stateful checking with some boolean we avoid
-    // messing with iterative rewriting. In StaticFor.jrag many rewritings are
-    // not changing the objects, they emit new ones so state is lost. 
-
-    // TODO: The checks below will be refactored as inh attributes which are
-    // more natural in JastAddJ.
-
-    // Checks if wrapped for accesses
-    syn boolean Access.isWrappedToReferenceOrNotNeeded() = type().isString();
-
-    eq PrimitiveTypeAccess.isWrappedToReferenceOrNotNeeded() = true;
-
-    eq ParTypeAccess.isWrappedToReferenceOrNotNeeded() {
-	TypeAccess access = (TypeAccess) getTypeAccess();
-	return access.getID().equals(Program.DelphJRuntimeClass) || 
-	    access.getID().equals(Program.DelphJRuntimeIface);
-    }
-
-    // Checks if wrapped for declarations
-    syn boolean ParameterDeclaration.isWrappedToReferenceOrNotNeeded() {
-	Access access = getTypeAccess();
-	return access.isWrappedToReferenceOrNotNeeded();
-    }
-
-    // Fine grained checks for various ASTNodes
-    // TODO: Of course needs refactoring later
-
-    syn boolean BodyDecl.canBeRewritten() = 
-	!hostType().name().equals(Program.DelphJRuntimeClass) && 
-	!hostType().name().equals(Program.DelphJRuntimeIface) && 
-	hostType().compilationUnit().fromSource() &&
-	!isAlreadyRewritten();
-
-    syn boolean Expr.canBeRewritten() {
-	if (!(!hostType().name().equals(Program.DelphJRuntimeClass) && 
-	      !hostType().name().equals(Program.DelphJRuntimeIface) && 
-	      hostType().compilationUnit().fromSource()))
-	    return false;
-
-	// If StringLiteral and ClassInstanceExpr are part of our system, we
-	// don't rewrite them.
-	if (getParent().getParent() instanceof MethodAccess) {
-	    MethodAccess parentMethodAccess = (MethodAccess) getParent().getParent();
-
-	    if (parentMethodAccess.getID().equals(Program.InvokeMethodName))
-		return false;
-	}
-
-	return !isAlreadyRewritten();
-    }
-
-    syn boolean Stmt.canBeRewritten() = 	
-	!hostType().name().equals(Program.DelphJRuntimeClass) && 
-	!hostType().name().equals(Program.DelphJRuntimeIface) && 
-	hostType().compilationUnit().fromSource() &&
-	!isAlreadyRewritten();	
-
-    eq MethodDecl.canBeRewritten() = super.canBeRewritten() && 
-	!getID().equals("main");
-
-    syn boolean BodyDecl.isAlreadyRewritten() = false;
-    syn boolean Expr.isAlreadyRewritten() = false;
-    syn boolean Stmt.isAlreadyRewritten() = false;
-
-    eq MethodDecl.isAlreadyRewritten() {
-	if(getNumParameter()>0)
-	    return getParameter(0).getID().equals(Program.SelfParameterName);
-
-	return !getTypeAccess().isWrappedToReferenceOrNotNeeded();
-    }
-
-    eq Dot.isAlreadyRewritten() = 
-	isMethodAccess() && 
-	((MethodAccess) lastAccess()).getID().equals(Program.GetDataMethodName);
-
-    eq ClassInstanceExpr.isAlreadyRewritten() {
-	Access access = getAccess();
-	// Checks if this class instance expr is a parameterized reference
-	// accesss of our runtime system.
-	if (access instanceof ParTypeAccess && 
-	    ((ParTypeAccess) access).isWrappedToReferenceOrNotNeeded())
-	    return true;
-	else {
-	    // Else if this new is already a parameterized reference access
-	    // enclosing.
-	    ASTNode potentialEnclosingClassInstanceExpr = this.getParent().getParent();
-
-	    if (potentialEnclosingClassInstanceExpr instanceof ClassInstanceExpr){
-		ClassInstanceExpr enclosing = (ClassInstanceExpr) potentialEnclosingClassInstanceExpr;
-		Access enclosingAccess = enclosing.getAccess();
-		if (enclosingAccess instanceof ParTypeAccess)
-		    return ((ParTypeAccess) enclosingAccess).isWrappedToReferenceOrNotNeeded();
-	    }
-	}
-
-	return false;
-    }
-
-    eq FieldDeclaration.isAlreadyRewritten() = getTypeAccess().isWrappedToReferenceOrNotNeeded();
-    eq VariableDeclaration.isAlreadyRewritten() = getTypeAccess().isWrappedToReferenceOrNotNeeded();
-
     rewrite FieldDeclaration { 
 	when (canBeRewritten()) 
 	    to FieldDeclaration {
@@ -149,10 +48,9 @@ aspect DJRewrites {
 			
 	    Access access = getAccess();
 
-	    ClassInstanceExpr classInstanceExpr = new ClassInstanceExpr(
-									access.wrapToReference(), 
-									constructorList);
-
+	    ClassInstanceExpr classInstanceExpr = 
+		new ClassInstanceExpr(access.wrapToReference(), 
+				      constructorList);
 	    return classInstanceExpr;
 	}
     }
@@ -185,8 +83,30 @@ aspect DJRewrites {
 	}
     }
 
+    // - a single path var access 
+    rewrite VarAccess {
+	when(!duringSyntacticClassification() &&
+	     isFieldAccess() && !isDest() && 
+	     
+	     canBeRewritten())
+	    to CastExpr {
+
+	    Access accessOfVar = this.type().createQualifiedAccess();
+
+	    // Get the type with which to cast the getData method invocation.
+	    if (accessOfVar instanceof ParTypeAccess)
+		accessOfVar = ((ParTypeAccess) accessOfVar).getTypeArgument(0);
+
+	    Dot dotAccess = new Dot(this, 
+				    new MethodAccess(Program.GetDataMethodName, new List<Expr>()));	    
+	    
+	    return new CastExpr(accessOfVar, dotAccess);
+	}
+    }
+    
+    // - method invocations
+    // - subobject field accesses that are not destination of an assignment
     rewrite Dot {
-	
 	// Rewrite method invocation to a method invocation with cast explicitely
 	// applied to a method invocation on the self parameter as the receiver
 	// that is passed as argument to the caller.
@@ -197,12 +117,9 @@ aspect DJRewrites {
 	      leftSide().isVariable())
 	    to CastExpr {
 
-	    Expr dotAccess = getLeft();
-			
+	    Expr dotAccess = getLeft();		
 	    MethodAccess oldMethodAccess = (MethodAccess) lastAccess();
-
 	    MethodAccess newMethodAccess = new MethodAccess();
-
 	    List<Expr> argumentList = new List<Expr>();
 
 	    /********* 1. pass self as a string as first argument *********/
@@ -267,12 +184,12 @@ aspect DJRewrites {
 
 	// Adding getData() method access in a two step approach. Add getData()
 	// method, wire the new rewritten node and then cast the result.
-	when(!duringSyntacticClassification() && 
-	     isFieldAccess() && 
-	     canBeRewritten() && 
+	when(!duringSyntacticClassification() &&
 	     isMethodAccess() && 
+	     canBeRewritten() &&
 	     leftSide().isVariable())
 	    to Access {
+
 	    VarAccess var = (VarAccess) leftSide();
 
 	    Access accessOfVar = var.type().createQualifiedAccess();
@@ -285,21 +202,15 @@ aspect DJRewrites {
 	    ParExpr expr = null;
 	    if (var.hasPrevExpr()) {
 		Expr previousExpr = var.prevExpr(); // previousExpr := ((C)c.getData()) remaining := c1.b1
-
 		ParExpr result = new ParExpr(new Dot(new Dot(previousExpr, var), 
 				 		     new MethodAccess(Program.GetDataMethodName, new List<Expr>())));
-
+	
 		nestedCastInParenthesis = new ParExpr(new CastExpr(accessOfVar, result));
-
 		this.parentDot().setLeft(nestedCastInParenthesis);
-
 		if (rightSide().isVariable()) {
-
 		    this.parentDot().setLeft(nestedCastInParenthesis);
-
 		    return rightSide();
 		}
-
 		return rightSide();
 	    } else {
 
@@ -307,9 +218,7 @@ aspect DJRewrites {
 					    new MethodAccess(Program.GetDataMethodName, new List<Expr>()));
 
 		expr = new ParExpr(new CastExpr(accessOfVar, dotExpression));
-
 		this.setLeft(expr);
-
 		return this;
 	    }
 	}
@@ -347,21 +256,17 @@ aspect DJRewrites {
 	    constructorList.add(getInit());
 	    constructorList.add(new VarAccess(Program.SelfParameterName));
 
-	    return new VariableDeclaration(
-					   this.getModifiers(),
+	    return new VariableDeclaration(this.getModifiers(),
 					   this.getTypeAccess().wrapToReferenceIface(),
 					   this.getID(),
-					   new Opt<Expr>(
-							 new ClassInstanceExpr(
-									       this.getTypeAccess().wrapToReference(), 
+					   new Opt<Expr>(new ClassInstanceExpr(this.getTypeAccess().wrapToReference(), 
 									       constructorList)));
 	}
 	when (canBeRewritten() && type().isReferenceType() && !type().isString())
 	    to VariableDeclaration {
 	    // We omit rewriting the initializing expression, it will get
 	    // rewritten indipendently. 
-	    return new VariableDeclaration(
-					   this.getModifiers(),
+	    return new VariableDeclaration(this.getModifiers(),
 					   this.getTypeAccess().wrapToReferenceIface(),
 					   this.getID(),
 					   new Opt<Expr>(getInit()));

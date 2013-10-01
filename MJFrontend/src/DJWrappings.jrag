@@ -1,0 +1,22 @@
+aspect DJWrappings {
+    // Transforms a type access to a parameterized type access of Reference.
+    // Integer -> Reference <Integer>
+    syn Access Access.wrapToReference() {
+	return new ParTypeAccess(new TypeAccess(Program.DelphJRuntimePackage, Program.DelphJRuntimeClass), 
+				 new List().add(this));
+    }
+
+    syn Access Access.wrapToReferenceIface() {
+	return new ParTypeAccess(new TypeAccess(Program.DelphJRuntimePackage, Program.DelphJRuntimeIface), 
+				 new List().add(this));
+    }
+
+    // Overriding String type access.
+    eq TypeAccess.wrapToReferenceIface() = name().equals("String")?this:super.wrapToReferenceIface();
+    eq TypeAccess.wrapToReference() = name().equals("String")?this:super.wrapToReference();
+
+    // No need for transformation of int, float, void, etc
+    eq PrimitiveTypeAccess.wrapToReference() = this;
+    eq PrimitiveTypeAccess.wrapToReferenceIface() = this;
+
+}

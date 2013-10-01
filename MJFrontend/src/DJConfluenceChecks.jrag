@@ -1,0 +1,106 @@
+aspect DJConfluenceChecks {
+
+
+
+    // By not implementing stateful checking with some boolean we avoid
+    // messing with iterative rewriting. In StaticFor.jrag many rewritings are
+    // not changing the objects, they emit new ones so state is lost. 
+
+    // TODO: The checks below will be refactored as inh attributes which are
+    // more natural in JastAddJ.
+
+    // Checks if wrapped for accesses
+    syn boolean Access.isWrappedToReferenceOrNotNeeded() = type().isString();
+
+    eq PrimitiveTypeAccess.isWrappedToReferenceOrNotNeeded() = true;
+
+    eq ParTypeAccess.isWrappedToReferenceOrNotNeeded() {
+	TypeAccess access = (TypeAccess) getTypeAccess();
+	return access.getID().equals(Program.DelphJRuntimeClass) || 
+	    access.getID().equals(Program.DelphJRuntimeIface);
+    }
+
+    // Checks if wrapped for declarations
+    syn boolean ParameterDeclaration.isWrappedToReferenceOrNotNeeded() {
+	Access access = getTypeAccess();
+	return access.isWrappedToReferenceOrNotNeeded();
+    }
+
+    // Fine grained checks for various ASTNodes
+    // TODO: Of course needs refactoring later
+
+    syn boolean BodyDecl.canBeRewritten() = 
+	!hostType().name().equals(Program.DelphJRuntimeClass) && 
+	!hostType().name().equals(Program.DelphJRuntimeIface) && 
+	hostType().compilationUnit().fromSource() &&
+	!isAlreadyRewritten();
+
+    syn boolean Expr.canBeRewritten() {
+	if (!(!hostType().name().equals(Program.DelphJRuntimeClass) && 
+	      !hostType().name().equals(Program.DelphJRuntimeIface) && 
+	      hostType().compilationUnit().fromSource()))
+	    return false;
+
+	// If StringLiteral and ClassInstanceExpr are part of our system, we
+	// don't rewrite them.
+	if (getParent().getParent() instanceof MethodAccess) {
+	    MethodAccess parentMethodAccess = (MethodAccess) getParent().getParent();
+
+	    if (parentMethodAccess.getID().equals(Program.InvokeMethodName))
+		return false;
+	}
+
+	return !isAlreadyRewritten();
+    }
+
+    syn boolean Stmt.canBeRewritten() = 	
+	!hostType().name().equals(Program.DelphJRuntimeClass) && 
+	!hostType().name().equals(Program.DelphJRuntimeIface) && 
+	hostType().compilationUnit().fromSource() &&
+	!isAlreadyRewritten();	
+
+    eq MethodDecl.canBeRewritten() = super.canBeRewritten() && 
+	!getID().equals("main");
+
+    syn boolean BodyDecl.isAlreadyRewritten() = false;
+    syn boolean Expr.isAlreadyRewritten() = false;
+    syn boolean Stmt.isAlreadyRewritten() = false;
+
+    eq MethodDecl.isAlreadyRewritten() {
+	if(getNumParameter()>0)
+	    return getParameter(0).getID().equals(Program.SelfParameterName);
+
+	return !getTypeAccess().isWrappedToReferenceOrNotNeeded();
+    }
+
+    eq Dot.isAlreadyRewritten() = 
+	isMethodAccess() && 
+	((MethodAccess) lastAccess()).getID().equals(Program.GetDataMethodName);
+
+    eq ClassInstanceExpr.isAlreadyRewritten() {
+	Access access = getAccess();
+	// Checks if this class instance expr is a parameterized reference
+	// accesss of our runtime system.
+	if (access instanceof ParTypeAccess && 
+	    ((ParTypeAccess) access).isWrappedToReferenceOrNotNeeded())
+	    return true;
+	else {
+	    // Else if this new is already a parameterized reference access
+	    // enclosing.
+	    ASTNode potentialEnclosingClassInstanceExpr = this.getParent().getParent();
+
+	    if (potentialEnclosingClassInstanceExpr instanceof ClassInstanceExpr){
+		ClassInstanceExpr enclosing = (ClassInstanceExpr) potentialEnclosingClassInstanceExpr;
+		Access enclosingAccess = enclosing.getAccess();
+		if (enclosingAccess instanceof ParTypeAccess)
+		    return ((ParTypeAccess) enclosingAccess).isWrappedToReferenceOrNotNeeded();
+	    }
+	}
+
+	return false;
+    }
+
+    eq FieldDeclaration.isAlreadyRewritten() = getTypeAccess().isWrappedToReferenceOrNotNeeded();
+    eq VariableDeclaration.isAlreadyRewritten() = getTypeAccess().isWrappedToReferenceOrNotNeeded();
+
+}
