@@ -1,9 +1,5 @@
 aspect DJRewrites {
 
-    public static boolean Program.rewritings() {
-	  return hasOption("-rewritings");
-    }
-
     public static String Program.DelphJRuntimeClass 	= "Reference";
     public static String Program.DelphJRuntimeIface 	= "IReference";
     public static String Program.DelphJRuntimePackage 	= "runtime";
@@ -55,6 +51,9 @@ aspect DJRewrites {
 	    ClassInstanceExpr classInstanceExpr = 
 		new ClassInstanceExpr(access.wrapToReference(), 
 				      constructorList);
+	    
+	    Program.printRewriting(this, classInstanceExpr);
+
 	    return classInstanceExpr;
 	}
     }
