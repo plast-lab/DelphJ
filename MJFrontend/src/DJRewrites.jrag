@@ -245,13 +245,15 @@ aspect DJRewrites {
     }
 
     rewrite VariableDeclaration {
-	when (canBeRewritten() && assignsSubobject())
+	when (canBeRewritten() 
+	      && assignsSubobject())
 	    to VariableDeclaration {
+
+	    Program.printBeforeRewriting(this);
 
 	    List<Expr> constructorList = new List<Expr>();
 	    constructorList.add(getInit());
 	    constructorList.add(new VarAccess(Program.SelfParameterName));
-
 	    return new VariableDeclaration(this.getModifiers(),
 					   this.getTypeAccess().wrapToReferenceIface(),
 					   this.getID(),
