@@ -1,5 +1,9 @@
 aspect DJRewrites {
 
+    public static boolean Program.rewritings() {
+	  return hasOption("-rewritings");
+    }
+
     public static String Program.DelphJRuntimeClass 	= "Reference";
     public static String Program.DelphJRuntimeIface 	= "IReference";
     public static String Program.DelphJRuntimePackage 	= "runtime";
@@ -63,18 +67,16 @@ aspect DJRewrites {
 	    List<ParameterDeclaration> newParameterList = new List<ParameterDeclaration>();
 	    for (ParameterDeclaration pd : getParameters() ) {
 		newParameterList.add(new ParameterDeclaration(pd.getTypeAccess().wrapToReferenceIface(),
-							      pd.getID()));
+								   pd.getID()));
 	    }
 
 	    // Add self parameter
 	    TypeDecl type = hostType();
 			
 	    TypeAccess access = (TypeAccess) ((type instanceof GenericTypeDecl)?
-					      ((GenericTypeDecl) type).createNoParamQualifiedAccess():type.createQualifiedAccess());
-			
+					      ((GenericTypeDecl) type).createNoParamQualifiedAccess():type.createQualifiedAccess());			
 	    newParameterList.insertChild(new ParameterDeclaration(access.wrapToReferenceIface(),
 								  Program.SelfParameterName), 0);
-
 	    this.setParameterList(newParameterList);
 
 	    // Rewrite return type
@@ -83,26 +85,26 @@ aspect DJRewrites {
 	}
     }
 
-    // - a single path var access 
-    rewrite VarAccess {
-	when(!duringSyntacticClassification() &&
-	     isFieldAccess() && !isDest() && 
-	     
-	     canBeRewritten())
-	    to CastExpr {
+    // // - a single path var access 
+    // rewrite VarAccess {
+    // 	when(!duringSyntacticClassification() &&
+    // 	     isFieldAccess() && !isDest() && 
+    // 	     canBeRewritten())
+    // 	    to CastExpr {
 
-	    Access accessOfVar = this.type().createQualifiedAccess();
+    // 	    Access accessOfVar = this.type().createQualifiedAccess();
 
-	    // Get the type with which to cast the getData method invocation.
-	    if (accessOfVar instanceof ParTypeAccess)
-		accessOfVar = ((ParTypeAccess) accessOfVar).getTypeArgument(0);
-
-	    Dot dotAccess = new Dot(this, 
-				    new MethodAccess(Program.GetDataMethodName, new List<Expr>()));	    
+    // 	    // Get the type with which to cast the getData method invocation.
+    // 	    if (accessOfVar instanceof ParTypeAccess)
+    // 		accessOfVar = ((ParTypeAccess) accessOfVar).getTypeArgument(0);	    
+    // 	    // create a dot access
+    // 	    Dot dotAccess = 
+    // 		new Dot(this, new MethodAccess(Program.GetDataMethodName, new List<Expr>()));	    
 	    
-	    return new CastExpr(accessOfVar, dotAccess);
-	}
-    }
+    // 	    // and return the casted expression
+    // 	    return new CastExpr(accessOfVar, dotAccess);
+    // 	}
+    // }
     
     // - method invocations
     // - subobject field accesses that are not destination of an assignment
@@ -177,7 +179,10 @@ aspect DJRewrites {
 			
 	    // Cast must be compatible with the return type of the rewritten
 	    // method declaration.
-	    return new CastExpr(oldMethodAccess.singleCandidateDecl().getTypeAccess().wrapToReferenceIface(),
+	    return new CastExpr(oldMethodAccess
+				.singleCandidateDecl()
+				.getTypeAccess()
+				.wrapToReferenceIface(),
 				new Dot(new VarAccess(Program.SelfParameterName),
 					newMethodAccess));
 	}
@@ -189,11 +194,8 @@ aspect DJRewrites {
 	     canBeRewritten() &&
 	     leftSide().isVariable())
 	    to Access {
-
 	    VarAccess var = (VarAccess) leftSide();
-
 	    Access accessOfVar = var.type().createQualifiedAccess();
-
 	    Expr nestedCastInParenthesis = var;
 
 	    if (accessOfVar instanceof ParTypeAccess)
@@ -204,7 +206,6 @@ aspect DJRewrites {
 		Expr previousExpr = var.prevExpr(); // previousExpr := ((C)c.getData()) remaining := c1.b1
 		ParExpr result = new ParExpr(new Dot(new Dot(previousExpr, var), 
 				 		     new MethodAccess(Program.GetDataMethodName, new List<Expr>())));
-	
 		nestedCastInParenthesis = new ParExpr(new CastExpr(accessOfVar, result));
 		this.parentDot().setLeft(nestedCastInParenthesis);
 		if (rightSide().isVariable()) {
@@ -216,7 +217,6 @@ aspect DJRewrites {
 
 		Dot dotExpression = new Dot(nestedCastInParenthesis, 
 					    new MethodAccess(Program.GetDataMethodName, new List<Expr>()));
-
 		expr = new ParExpr(new CastExpr(accessOfVar, dotExpression));
 		this.setLeft(expr);
 		return this;
@@ -233,17 +233,14 @@ aspect DJRewrites {
 	      parentDot().parentDot().leftSide() instanceof ParExpr)
 	    to Access {
 	    ParExpr parExpr = (ParExpr) parentDot().parentDot().leftSide();
-
 	    TypeAccess accessToLookupInto = (TypeAccess) ((CastExpr) parExpr
 							  .getExpr()).getTypeAccess();
-
 	    if (accessToLookupInto.decl() instanceof ClassDecl) {
 		FieldDeclaration foundField = ((ClassDecl) accessToLookupInto
 					       .decl()).findSingleVariable(this.name());
 		if (foundField != null)
 		    return new VarAccess(getPackage(), start(), end());
 	    }
-
 	    return this;
 	}
     }
@@ -265,31 +262,11 @@ aspect DJRewrites {
 	when (canBeRewritten() && type().isReferenceType() && !type().isString())
 	    to VariableDeclaration {
 	    // We omit rewriting the initializing expression, it will get
-	    // rewritten indipendently. 
+	    // rewritten independently. 
 	    return new VariableDeclaration(this.getModifiers(),
 					   this.getTypeAccess().wrapToReferenceIface(),
 					   this.getID(),
 					   new Opt<Expr>(getInit()));
 	}
     }
-
-    // Transforms a type access to a parameterized type access of Reference.
-    // Integer -> Reference <Integer>
-    syn Access Access.wrapToReference() {
-	return new ParTypeAccess(new TypeAccess(Program.DelphJRuntimePackage, Program.DelphJRuntimeClass), 
-				 new List().add(this));
-    }
-
-    syn Access Access.wrapToReferenceIface() {
-	return new ParTypeAccess(new TypeAccess(Program.DelphJRuntimePackage, Program.DelphJRuntimeIface), 
-				 new List().add(this));
-    }
-
-    // Overriding String type access.
-    eq TypeAccess.wrapToReferenceIface() = name().equals("String")?this:super.wrapToReferenceIface();
-    eq TypeAccess.wrapToReference() = name().equals("String")?this:super.wrapToReference();
-
-    // No need for transformation of int, float, void, etc
-    eq PrimitiveTypeAccess.wrapToReference() = this;
-    eq PrimitiveTypeAccess.wrapToReferenceIface() = this;
 }

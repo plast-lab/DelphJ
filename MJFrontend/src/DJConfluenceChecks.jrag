@@ -1,15 +1,11 @@
 aspect DJConfluenceChecks {
 
+    // Note 1: By not implementing stateful checking with some boolean we avoid messing
+    // with iterative rewriting. In StaticFor.jrag many rewritings are not
+    // changing the objects, they emit new ones so state is lost.
 
+    /*************** isWrappedToReferenceOrNotNeeded ******************/
 
-    // By not implementing stateful checking with some boolean we avoid
-    // messing with iterative rewriting. In StaticFor.jrag many rewritings are
-    // not changing the objects, they emit new ones so state is lost. 
-
-    // TODO: The checks below will be refactored as inh attributes which are
-    // more natural in JastAddJ.
-
-    // Checks if wrapped for accesses
     syn boolean Access.isWrappedToReferenceOrNotNeeded() = type().isString();
 
     eq PrimitiveTypeAccess.isWrappedToReferenceOrNotNeeded() = true;
@@ -20,21 +16,13 @@ aspect DJConfluenceChecks {
 	    access.getID().equals(Program.DelphJRuntimeIface);
     }
 
-    // Checks if wrapped for declarations
     syn boolean ParameterDeclaration.isWrappedToReferenceOrNotNeeded() {
 	Access access = getTypeAccess();
 	return access.isWrappedToReferenceOrNotNeeded();
     }
 
-    // Fine grained checks for various ASTNodes
-    // TODO: Of course needs refactoring later
-
-    syn boolean BodyDecl.canBeRewritten() = 
-	!hostType().name().equals(Program.DelphJRuntimeClass) && 
-	!hostType().name().equals(Program.DelphJRuntimeIface) && 
-	hostType().compilationUnit().fromSource() &&
-	!isAlreadyRewritten();
-
+    /*********************** canBeRewritten ***************************/
+    /* EXPRESSIONS */
     syn boolean Expr.canBeRewritten() {
 	if (!(!hostType().name().equals(Program.DelphJRuntimeClass) && 
 	      !hostType().name().equals(Program.DelphJRuntimeIface) && 
@@ -45,22 +33,30 @@ aspect DJConfluenceChecks {
 	// don't rewrite them.
 	if (getParent().getParent() instanceof MethodAccess) {
 	    MethodAccess parentMethodAccess = (MethodAccess) getParent().getParent();
-
 	    if (parentMethodAccess.getID().equals(Program.InvokeMethodName))
 		return false;
 	}
-
 	return !isAlreadyRewritten();
-    }
+    }    
 
+    /* STATEMENTS */
     syn boolean Stmt.canBeRewritten() = 	
 	!hostType().name().equals(Program.DelphJRuntimeClass) && 
 	!hostType().name().equals(Program.DelphJRuntimeIface) && 
 	hostType().compilationUnit().fromSource() &&
 	!isAlreadyRewritten();	
 
-    eq MethodDecl.canBeRewritten() = super.canBeRewritten() && 
-	!getID().equals("main");
+    /* BODY DECLARATION */
+    syn boolean BodyDecl.canBeRewritten() = 
+	!hostType().name().equals(Program.DelphJRuntimeClass) && 
+	!hostType().name().equals(Program.DelphJRuntimeIface) && 
+	hostType().compilationUnit().fromSource() &&
+	!isAlreadyRewritten();
+
+    /* DECLARATIONS */
+    eq MethodDecl.canBeRewritten() = super.canBeRewritten() && !getID().equals("main");
+
+    /*********************** isAlreadyRewritten ***************************/
 
     syn boolean BodyDecl.isAlreadyRewritten() = false;
     syn boolean Expr.isAlreadyRewritten() = false;
@@ -69,14 +65,10 @@ aspect DJConfluenceChecks {
     eq MethodDecl.isAlreadyRewritten() {
 	if(getNumParameter()>0)
 	    return getParameter(0).getID().equals(Program.SelfParameterName);
-
 	return !getTypeAccess().isWrappedToReferenceOrNotNeeded();
     }
-
-    eq Dot.isAlreadyRewritten() = 
-	isMethodAccess() && 
-	((MethodAccess) lastAccess()).getID().equals(Program.GetDataMethodName);
-
+    eq AbstractDot.isAlreadyRewritten() = isMethodAccess() && lastAccess().isGetDataMethod();
+    eq VarAccess.isAlreadyRewritten() = hasParentDot() && parentDot().isMethodAccess() && parentDot().isAlreadyRewritten();
     eq ClassInstanceExpr.isAlreadyRewritten() {
 	Access access = getAccess();
 	// Checks if this class instance expr is a parameterized reference
@@ -88,7 +80,6 @@ aspect DJConfluenceChecks {
 	    // Else if this new is already a parameterized reference access
 	    // enclosing.
 	    ASTNode potentialEnclosingClassInstanceExpr = this.getParent().getParent();
-
 	    if (potentialEnclosingClassInstanceExpr instanceof ClassInstanceExpr){
 		ClassInstanceExpr enclosing = (ClassInstanceExpr) potentialEnclosingClassInstanceExpr;
 		Access enclosingAccess = enclosing.getAccess();
@@ -96,11 +87,13 @@ aspect DJConfluenceChecks {
 		    return ((ParTypeAccess) enclosingAccess).isWrappedToReferenceOrNotNeeded();
 	    }
 	}
-
 	return false;
     }
 
     eq FieldDeclaration.isAlreadyRewritten() = getTypeAccess().isWrappedToReferenceOrNotNeeded();
     eq VariableDeclaration.isAlreadyRewritten() = getTypeAccess().isWrappedToReferenceOrNotNeeded();
 
+    /* Helpers */
+    syn Boolean Access.isGetDataMethod() = false;
+    eq MethodAccess.isGetDataMethod() = name().equals(Program.GetDataMethodName);
 }
