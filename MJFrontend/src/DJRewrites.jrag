@@ -66,7 +66,7 @@ aspect DJRewrites {
 	    List<ParameterDeclaration> newParameterList = new List<ParameterDeclaration>();
 	    for (ParameterDeclaration pd : getParameters() ) {
 		newParameterList.add(new ParameterDeclaration(pd.getTypeAccess().wrapToReferenceIface(),
-								   pd.getID()));
+							      pd.getID()));
 	    }
 
 	    // Add self parameter
@@ -83,30 +83,9 @@ aspect DJRewrites {
 	    return this;
 	}
     }
-
-    // // - a single path var access 
-    // rewrite VarAccess {
-    // 	when(!duringSyntacticClassification() &&
-    // 	     isFieldAccess() && !isDest() && 
-    // 	     canBeRewritten())
-    // 	    to CastExpr {
-
-    // 	    Access accessOfVar = this.type().createQualifiedAccess();
-
-    // 	    // Get the type with which to cast the getData method invocation.
-    // 	    if (accessOfVar instanceof ParTypeAccess)
-    // 		accessOfVar = ((ParTypeAccess) accessOfVar).getTypeArgument(0);	    
-    // 	    // create a dot access
-    // 	    Dot dotAccess = 
-    // 		new Dot(this, new MethodAccess(Program.GetDataMethodName, new List<Expr>()));	    
-	    
-    // 	    // and return the casted expression
-    // 	    return new CastExpr(accessOfVar, dotAccess);
-    // 	}
-    // }
     
-    // - method invocations
-    // - subobject field accesses that are not destination of an assignment
+    // Rewrite for method invocations and subobject field accesses that are not
+    // destination of an assignment.
     rewrite Dot {
 	// Rewrite method invocation to a method invocation with cast explicitely
 	// applied to a method invocation on the self parameter as the receiver
@@ -252,7 +231,17 @@ aspect DJRewrites {
 	    Program.printBeforeRewriting(this);
 
 	    List<Expr> constructorList = new List<Expr>();
-	    constructorList.add(getInit());
+	    
+	    // Create getData() method access to head of the access path.
+	    Access accessOfVar = getTypeAccess().type().createQualifiedAccess();
+
+    	    if (accessOfVar instanceof ParTypeAccess)
+    		accessOfVar = ((ParTypeAccess) accessOfVar).getTypeArgument(0);	    
+
+    	    Dot dotAccess = 
+    		new Dot(getInit(), new MethodAccess(Program.GetDataMethodName, new List<Expr>()));	    
+     
+	    constructorList.add(new CastExpr(accessOfVar, dotAccess));
 	    constructorList.add(new VarAccess(Program.SelfParameterName));
 	    return new VariableDeclaration(this.getModifiers(),
 					   this.getTypeAccess().wrapToReferenceIface(),
@@ -262,6 +251,9 @@ aspect DJRewrites {
 	}
 	when (canBeRewritten() && type().isReferenceType() && !type().isString())
 	    to VariableDeclaration {
+
+	    Program.printBeforeRewriting(this);
+
 	    // We omit rewriting the initializing expression, it will get
 	    // rewritten independently. 
 	    return new VariableDeclaration(this.getModifiers(),
