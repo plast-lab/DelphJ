@@ -8,7 +8,7 @@ class TestDispatch {
 
 		C c = new C();
 
-		//b.getData().b1 = a;
+		//b.b1 = a;
 		b.b1 = a; 
 
 		//c.getData().c1.getData().b1 = a;

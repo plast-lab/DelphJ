@@ -61,7 +61,7 @@ aspect DJRewrites {
     rewrite MethodDecl { 
 	when (canBeRewritten())
 	    to MethodDecl {
-
+	    Program.printBeforeRewriting("method declaration, adding one parameter with changed reference types", this);
 	    // Rewriting parameter list
 	    List<ParameterDeclaration> newParameterList = new List<ParameterDeclaration>();
 	    for (ParameterDeclaration pd : getParameters() ) {
@@ -96,7 +96,7 @@ aspect DJRewrites {
 	      canBeRewritten() && 
 	      leftSide().isVariable())
 	    to CastExpr {
-
+	    Program.printBeforeRewriting("main method invocation with self as first parameter", this);
 	    Expr dotAccess = getLeft();		
 	    MethodAccess oldMethodAccess = (MethodAccess) lastAccess();
 	    MethodAccess newMethodAccess = new MethodAccess();
@@ -170,8 +170,9 @@ aspect DJRewrites {
 	when(!duringSyntacticClassification() &&
 	     isMethodAccess() && 
 	     canBeRewritten() &&
-	     leftSide().isVariable())
+	     leftSide().isSubobjectDeclaration())
 	    to Access {
+	    Program.printBeforeRewriting("add getData() method access", this);
 	    VarAccess var = (VarAccess) leftSide();
 	    Access accessOfVar = var.type().createQualifiedAccess();
 	    Expr nestedCastInParenthesis = var;
@@ -210,6 +211,7 @@ aspect DJRewrites {
 	      parentDot().hasParentDot() && 
 	      parentDot().parentDot().leftSide() instanceof ParExpr)
 	    to Access {
+	    Program.printBeforeRewriting("var access to package access", this);
 	    ParExpr parExpr = (ParExpr) parentDot().parentDot().leftSide();
 	    TypeAccess accessToLookupInto = (TypeAccess) ((CastExpr) parExpr
 							  .getExpr()).getTypeAccess();
@@ -227,7 +229,7 @@ aspect DJRewrites {
 	when (canBeRewritten() 
 	      && assignsSubobject())
 	    to VariableDeclaration {
-	    Program.printBeforeRewriting(this);
+	    Program.printBeforeRewriting("variable declaration", this);
 
 	    List<Expr> constructorList = new List<Expr>();
 
