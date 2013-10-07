@@ -84,20 +84,20 @@ aspect DJRewrites {
 	}
     }
     
-    // Rewrite for method invocations and subobject field accesses that are not
-    // destination of an assignment.
     rewrite Dot {
-	// Rewrite method invocation to a method invocation with cast explicitely
-	// applied to a method invocation on the self parameter as the receiver
-	// that is passed as argument to the caller.
+	// Rewrite method invocation to a method invocation with cast
+	// explicitely applied to a method invocation on the self parameter as
+	// the receiver that is passed as argument to the caller.
 	when (!duringSyntacticClassification() && 
-	      getLeft().isThisAccess() && 
+	      leftSide().isThisAccess() && 
 	      isMethodAccess() && 
-	      canBeRewritten() && 
-	      leftSide().isVariable())
+	      canBeRewritten())
+
 	    to CastExpr {
+	    
 	    Program.printBeforeRewriting("main method invocation with self as first parameter", this);
-	    Expr dotAccess = getLeft();		
+	    
+	    Expr dotAccess = leftSide();		
 	    MethodAccess oldMethodAccess = (MethodAccess) lastAccess();
 	    MethodAccess newMethodAccess = new MethodAccess();
 	    List<Expr> argumentList = new List<Expr>();
