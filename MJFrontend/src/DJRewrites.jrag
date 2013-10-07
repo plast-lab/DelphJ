@@ -227,14 +227,12 @@ aspect DJRewrites {
 	when (canBeRewritten() 
 	      && assignsSubobject())
 	    to VariableDeclaration {
-
 	    Program.printBeforeRewriting(this);
 
 	    List<Expr> constructorList = new List<Expr>();
-	    
-	    // Create getData() method access to head of the access path.
-	    Access accessOfVar = getTypeAccess().type().createQualifiedAccess();
 
+	    // Create getData() method access to the head of the access path.
+	    Access accessOfVar = getTypeAccess().type().createQualifiedAccess();
     	    if (accessOfVar instanceof ParTypeAccess)
     		accessOfVar = ((ParTypeAccess) accessOfVar).getTypeArgument(0);	    
 
@@ -249,13 +247,14 @@ aspect DJRewrites {
 					   new Opt<Expr>(new ClassInstanceExpr(this.getTypeAccess().wrapToReference(), 
 									       constructorList)));
 	}
-	when (canBeRewritten() && type().isReferenceType() && !type().isString())
+
+	// We omit rewriting the initializing expression, it will get
+	// rewritten independently.
+	when (canBeRewritten() && 
+	      type().isReferenceType() && 
+	      !type().isString())
 	    to VariableDeclaration {
-
 	    Program.printBeforeRewriting(this);
-
-	    // We omit rewriting the initializing expression, it will get
-	    // rewritten independently. 
 	    return new VariableDeclaration(this.getModifiers(),
 					   this.getTypeAccess().wrapToReferenceIface(),
 					   this.getID(),
