@@ -22,17 +22,15 @@ class MJCompiler extends Frontend {
 		    return new parser.JavaParser().parse(is, fileName);
 		}
 	    });
-
-	// save the generated output
+	
+	// Save the generated output.
 	try {
 	    PrintWriter writer = new PrintWriter("/home/bibou/Projects/DelphJ/delphj-tests/Generated.java", "UTF-8");
 	    writer.write(compiler.program.toString());
 	    writer.close();
 	} catch (FileNotFoundException e) {
-	    // TODO Auto-generated catch block
 	    e.printStackTrace();
 	} catch (UnsupportedEncodingException e) {
-	    // TODO Auto-generated catch block
 	    e.printStackTrace();
 	}
 		

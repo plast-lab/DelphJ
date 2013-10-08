@@ -1,0 +1,44 @@
+#!/bin/bash
+
+DELPHJ_HOME=$mj
+RUNTIME_HOME="$DELPHJ_HOME/MJFrontend/src/runtime"
+RUNTIME_FILES=" $RUNTIME_HOME/Reference.java $RUNTIME_HOME/IReference.java "
+
+INPUT_FILES=
+OPTIONS=
+WHATIF=false
+
+function usage
+{
+    echo "usage: delphjc [[-r | --rewritings ] | [-h] | [--whatif]] files"
+}
+while [ "$1" != "" ]; do
+    case $1 in
+        -r | --rewritings )
+	    shift
+            OPTIONS="$OPTIONS -rewritings"
+            ;;
+        -h | --help )
+            usage
+            exit
+            ;;
+	--whatif )
+	    WHATIF=true
+	    shift
+	    ;;
+        *.java ) 
+	    INPUT_FILES="$INPUT_FILES $1"
+	    shift
+	    ;;
+	* )
+	    shift
+	    ;;
+    esac
+done
+
+if $WHATIF 
+then
+    echo "java main.MJCompiler$OPTIONS$RUNTIME_FILES$INPUT_FILES"
+else
+    java main.MJCompiler $OPTIONS $INPUT_FILES
+fi
