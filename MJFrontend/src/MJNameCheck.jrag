@@ -113,7 +113,8 @@ aspect MJNameCheck {
 				id, new List(), new List());
 	
 	sfd.is$Final = true;
-	addBodyDecl(sfd);
+	
+	// addBodyDecl(sfd);
 
 	sfd.bypassErrorChecking = true;
 	return sfd;

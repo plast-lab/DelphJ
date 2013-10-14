@@ -247,8 +247,7 @@ aspect MJTypeCheckCore {
     }
 
     syn lazy boolean BodyDecl.isSubsumedBy(Pattern p, Map map) = false;
-    eq FieldDeclaration.isSubsumedBy(Pattern p, Map map) = 
-	p.subsumesFieldDeclaration(this, map);
+    eq FieldDeclaration.isSubsumedBy(Pattern p, Map map) = p.subsumesFieldDeclaration(this, map);
     eq MethodDecl.isSubsumedBy(Pattern p, Map map) = p.subsumesMethodDecl(this, map);
 
     syn lazy boolean Pattern.subsumesMethodDecl(MethodDecl md, Map map) = false;
@@ -517,6 +516,7 @@ aspect MJTypeCheckCore {
 	}
 	return null;
     }
+
     syn lazy boolean Modifiers.declaredFromPattern() {
 	ASTNode p = parent;
 	while ( p != null ) {
