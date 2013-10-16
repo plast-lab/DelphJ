@@ -6,7 +6,7 @@ aspect DJDebugRewrites {
 
     public static void Program.printRewriting(ASTNode oldN, ASTNode newN) {
 	if(Program.rewritings())
-	    System.out.println("##### line: "+ oldN.location() + "\t########\n" + 
+	    System.out.println("##### line: "+ oldN.location() + ":" + oldN.sourceFile() + "\n" + 
 			       oldN.dumpTree() + "### -> \n" + 
 			       newN.dumpTree() + 
 			       "########################\n");
@@ -14,7 +14,7 @@ aspect DJDebugRewrites {
 
     public static void Program.printBeforeRewriting(ASTNode node) {
 	if(Program.rewritings())
-	    System.out.println("###### line: "+ node.location() + "\t#########\n" + 
+	    System.out.println("###### line: "+ node.location() + ":" + node.sourceFile() + "\n" + 
 			       node.dumpTree() + 
 			       "#########################\n");
     }
