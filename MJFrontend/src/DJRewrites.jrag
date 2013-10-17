@@ -174,6 +174,7 @@ aspect DJRewrites {
 	     isFieldAccess() && 
 	     isDest() && 
 	     !leftSide().isThisAccess() && 
+	     leftSide() instanceof VarAccess && 
 	     canBeRewritten())
 	    to Access {
 	    Program.printBeforeRewriting("#4.2 Exposing subobject field for path merging.", this);
@@ -279,27 +280,27 @@ aspect DJRewrites {
 	    return this;
 	}
 
-	when (!duringSyntacticClassification() && 
-	      hasParentDot() &&
-	      canBeRewritten())
-	    to Access {
-	    Program.printBeforeRewriting("#5.2 Try disambiguate package access to variable access when used in path merging.", this);
+	// when (!duringSyntacticClassification() && 
+	//       hasParentDot() &&
+	//       canBeRewritten())
+	//     to Access {
+	//     Program.printBeforeRewriting("#5.2 Try disambiguate package access to variable access when used in path merging.", this);
 
-	    if(!hasPrevExpr()) { // is the first object access e.g. *c*.c1.b1
-		FieldDeclaration foundField = hostType().findSingleVariable(this.name()); // c is a field declaration
-		FieldDeclaration foundFieldOfNextAccess = null;
+	//     if(!hasPrevExpr()) { // is the first object access e.g. *c*.c1.b1
+	// 	FieldDeclaration foundField = hostType().findSingleVariable(this.name()); // c is a field declaration
+	// 	FieldDeclaration foundFieldOfNextAccess = null;
 
-		if (foundField != null && 
-		    hasNextAccess()) {
-		    foundFieldOfNextAccess = foundField.type().findSingleVariable(nextAccess().toString()); // c's next access is subobject access
+	// 	if (foundField != null && 
+	// 	    hasNextAccess()) {
+	// 	    foundFieldOfNextAccess = foundField.type().findSingleVariable(nextAccess().toString()); // c's next access is subobject access
 		    
-		    return foundFieldOfNextAccess.isSubobject()?
-			new VarAccess(getPackage(), start(), end()):this;
-		}
-	    } 
+	// 	    return foundFieldOfNextAccess.isSubobject()?
+	// 		new VarAccess(getPackage(), start(), end()):this;
+	// 	}
+	//     } 
 	    
-	    return this;
-	}
+	//     return this;
+	// }
     }
 
     // #6
