@@ -173,6 +173,7 @@ aspect DJRewrites {
 	when(!duringSyntacticClassification() &&
 	     isFieldAccess() && 
 	     isDest() && 
+	     !leftSide().isThisAccess() && 
 	     canBeRewritten())
 	    to Access {
 	    Program.printBeforeRewriting("#4.2 Exposing subobject field for path merging.", this);
@@ -180,12 +181,36 @@ aspect DJRewrites {
 	    //There are two cases:
 	    //ThisAccess case: this.b1.a1
 	    //VarAccess instance case: b.b1.a1 
+	    VarAccess var = (VarAccess) leftSide();
+	    Access accessOfVar = var.type().createQualifiedAccess();
+	    Expr nestedCastInParenthesis = var;
+
+	    if (accessOfVar instanceof ParTypeAccess)
+		accessOfVar = ((ParTypeAccess) accessOfVar).getTypeArgument(0);
 	    
-	    Expr var = leftSide();
-
-	    System.exit(1);
-
-	    return this;
+	    ParExpr expr = null;
+	    if (var.hasPrevExpr()) {
+		Expr previousExpr = var.prevExpr(); // previousExpr := ((C)c.getData()) remaining := c1.b1
+		ParExpr result = new ParExpr(
+				     new Dot(
+					 new Dot(previousExpr, var), 
+					 new MethodAccess(Program.GetDataMethodName, new List<Expr>())));
+		nestedCastInParenthesis = new ParExpr(new CastExpr(accessOfVar, result));
+		this.parentDot().setLeft(nestedCastInParenthesis);
+		if (rightSide().isVariable()) {
+		    this.parentDot().setLeft(nestedCastInParenthesis);
+		    return rightSide();
+		}
+		return rightSide();
+	    } else {
+		Dot dotExpression = 
+		    new Dot(nestedCastInParenthesis, 
+		        new MethodAccess(Program.GetDataMethodName, new List<Expr>()));
+		expr = new ParExpr(
+			   new CastExpr(accessOfVar, dotExpression));
+		this.setLeft(expr);
+		return this;
+	    }
 	}
 
 	// Adding getData() method access in a two step approach. Add getData()
@@ -206,8 +231,10 @@ aspect DJRewrites {
 	    ParExpr expr = null;
 	    if (var.hasPrevExpr()) {
 		Expr previousExpr = var.prevExpr(); // previousExpr := ((C)c.getData()) remaining := c1.b1
-		ParExpr result = new ParExpr(new Dot(new Dot(previousExpr, var), 
-				 		     new MethodAccess(Program.GetDataMethodName, new List<Expr>())));
+		ParExpr result = new ParExpr(
+				     new Dot(
+					 new Dot(previousExpr, var), 
+					 new MethodAccess(Program.GetDataMethodName, new List<Expr>())));
 		nestedCastInParenthesis = new ParExpr(new CastExpr(accessOfVar, result));
 		this.parentDot().setLeft(nestedCastInParenthesis);
 		if (rightSide().isVariable()) {
@@ -216,10 +243,11 @@ aspect DJRewrites {
 		}
 		return rightSide();
 	    } else {
-
-		Dot dotExpression = new Dot(nestedCastInParenthesis, 
-					    new MethodAccess(Program.GetDataMethodName, new List<Expr>()));
-		expr = new ParExpr(new CastExpr(accessOfVar, dotExpression));
+		Dot dotExpression = 
+		    new Dot(nestedCastInParenthesis, 
+		        new MethodAccess(Program.GetDataMethodName, new List<Expr>()));
+		expr = new ParExpr(
+			   new CastExpr(accessOfVar, dotExpression));
 		this.setLeft(expr);
 		return this;
 	    }
@@ -235,16 +263,41 @@ aspect DJRewrites {
 	      parentDot().hasParentDot() && 
 	      parentDot().parentDot().leftSide() instanceof ParExpr)
 	    to Access {
-	    Program.printBeforeRewriting("#5.1 Disambiguate package access to variable access.", this);
+	    Program.printBeforeRewriting("#5.1 Disambiguate package access to variable access when used in method invocation.", this);
+
 	    ParExpr parExpr = (ParExpr) parentDot().parentDot().leftSide();
-	    TypeAccess accessToLookupInto = (TypeAccess) ((CastExpr) parExpr
-							  .getExpr()).getTypeAccess();
+
+	    TypeAccess accessToLookupInto = 
+		(TypeAccess) ((CastExpr) parExpr.getExpr()).getTypeAccess();
+
 	    if (accessToLookupInto.decl() instanceof ClassDecl) {
 		FieldDeclaration foundField = ((ClassDecl) accessToLookupInto
 					       .decl()).findSingleVariable(this.name());
 		if (foundField != null)
 		    return new VarAccess(getPackage(), start(), end());
 	    }
+	    return this;
+	}
+
+	when (!duringSyntacticClassification() && 
+	      hasParentDot() &&
+	      canBeRewritten())
+	    to Access {
+	    Program.printBeforeRewriting("#5.2 Try disambiguate package access to variable access when used in path merging.", this);
+
+	    if(!hasPrevExpr()) { // is the first object access e.g. *c*.c1.b1
+		FieldDeclaration foundField = hostType().findSingleVariable(this.name()); // c is a field declaration
+		FieldDeclaration foundFieldOfNextAccess = null;
+
+		if (foundField != null && 
+		    hasNextAccess()) {
+		    foundFieldOfNextAccess = foundField.type().findSingleVariable(nextAccess().toString()); // c's next access is subobject access
+		    
+		    return foundFieldOfNextAccess.isSubobject()?
+			new VarAccess(getPackage(), start(), end()):this;
+		}
+	    } 
+	    
 	    return this;
 	}
     }
@@ -254,7 +307,7 @@ aspect DJRewrites {
 	when (canBeRewritten() 
 	      && assignsSubobject())
 	    to VariableDeclaration {
-	    Program.printBeforeRewriting("#6.1 variable declaration.", this);
+	    Program.printBeforeRewriting("#6.1 Variable declaration.", this);
 
 	    List<Expr> constructorList = new List<Expr>();
 

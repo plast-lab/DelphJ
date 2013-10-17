@@ -8,7 +8,7 @@ class TestDispatch {
 
 	C c = new C();
 
-	b.b1 = a;
+	c.c1.b1 = a;
 	
 	// b.b1.compareTo(5);
 
