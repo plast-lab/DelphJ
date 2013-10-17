@@ -7,14 +7,13 @@ eschews inheritance completely, in favor of a combination of class morphing and
 compiler][1]. `delphjc` is implemented via AST rewriting using JastAddJ. In a
 nutshell the implementation of the compiler is based on two things:
 
-1. A runtime system that is implemented in `Reference.java` (and the supporting interface) the implements the dynamic semantics described on the paper.  
+1. A runtime system that is implemented in a core class named `Reference` that implements the dynamic semantics described in the paper.  
 2. A rewrite system on-top the MorphJ compiler.
 
 You can see differences between the original MorphJ implementation and DelphJ with the following git
 command:
 
 `git diff -w morphj..master`
-
      
 Rewritings employed
 -------------------
@@ -28,8 +27,13 @@ Rewritings employed
 5. Disambiguate package access to variable access.
 6. Variable declaration.
 
-Running the compiler
---------------------
+Building & Running the compiler
+-------------------------------
+
+To build the compiler run ant with DelphJ's backend build.xml
+
+`ant -f ~/DelphJ/MJBackend/src/build.xml`
+
 The compiler runs via the `delphjc` executable script (which must be part of the
 PATH envirnment variable) and requires one more to be set which points to the
 DelphJ root directory:
@@ -54,9 +58,10 @@ MorphJ papers:
 - [Morphing: Safely Shaping a Class in the Image of Others][3]
 - [Morphing Software for Easier Evolution][4]
 
+*This project is based on our [OOPSLA'13 paper][5] and is for demonstration purposes only.*
 
 [1]: http://code.google.com/p/morphing/wiki/MorphJ
 [2]: http://www.cs.umass.edu/~yannis/morphj-pldi08.pdf
 [3]: http://www.cs.umass.edu/~yannis/mj.pdf
 [4]: http://www.cs.umass.edu/~yannis/ramse07.pdf
-[5]: http://cgi.di.uoa.gr/~biboudis/forsaking-inheritance-oopsla13.pdf
+[5]: http://www.di.uoa.gr/~biboudis/forsaking-inheritance-oopsla13.pdf
