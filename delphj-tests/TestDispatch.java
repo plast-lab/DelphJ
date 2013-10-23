@@ -12,7 +12,7 @@ class TestDispatch {
 
 	// TODO: c.c1.b1 = a;
 	
-	// TODO: b.b1.compareTo(5);
+	b.b1.compareTo(5);
 
 	// String result = b.b1.meth1("lala", 10);
 

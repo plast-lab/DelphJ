@@ -100,7 +100,7 @@ aspect DJRewrites {
 
 	    to CastExpr {
 	    
-	    Program.printBeforeRewriting("#4.1 Method invocation to a reflective invocation with self as first parameter.", this);
+	    Program.printBeforeRewriting("#4.i Method invocation to a reflective invocation with self as first parameter.", this);
 	    
 	    Expr dotAccess = leftSide();		
 	    MethodAccess oldMethodAccess = (MethodAccess) lastAccess();
@@ -177,7 +177,7 @@ aspect DJRewrites {
 	     leftSide() instanceof VarAccess && 
 	     canBeRewritten())
 	    to Access {
-	    Program.printBeforeRewriting("#4.2 Exposing subobject field for path merging.", this);
+	    Program.printBeforeRewriting("#4.ii Exposing subobject field for path merging.", this);
 	    
 	    //There are two cases:
 	    //ThisAccess case: this.b1.a1
@@ -221,7 +221,7 @@ aspect DJRewrites {
 	     canBeRewritten() &&
 	     leftSide().isSubobjectDeclaration())
 	    to Access {
-	    Program.printBeforeRewriting("#4.3 Adding getData() method access when invoking method on subobject fields.", this);
+	    Program.printBeforeRewriting("#4.iii Adding getData() method access when invoking method on subobject fields.", this);
 	    VarAccess var = (VarAccess) leftSide();
 	    Access accessOfVar = var.type().createQualifiedAccess();
 	    Expr nestedCastInParenthesis = var;
