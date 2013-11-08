@@ -1,8 +1,6 @@
 DelphJ
 ======
 
-*in progress*
-
 DelphJ is a Java-based OO language (MorphJ with delegation features) that
 eschews inheritance completely, in favor of a combination of class morphing and
 (deep) delegation. DelphJ runs on top of the JVM and is based on the [MorphJ
@@ -60,7 +58,7 @@ MorphJ papers:
 - [Morphing: Safely Shaping a Class in the Image of Others][3]
 - [Morphing Software for Easier Evolution][4]
 
-*This project is based on our [OOPSLA'13 paper][5] and is for demonstration purposes only.*
+* This project is a work in progress and is based on our [OOPSLA'13 paper][5];it is for demonstration purposes only.*
 
 [1]: http://code.google.com/p/morphing/wiki/MorphJ
 [2]: http://www.cs.umass.edu/~yannis/morphj-pldi08.pdf
