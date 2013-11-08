@@ -58,7 +58,7 @@ MorphJ papers:
 - [Morphing: Safely Shaping a Class in the Image of Others][3]
 - [Morphing Software for Easier Evolution][4]
 
-* This project is a work in progress and is based on our [OOPSLA'13 paper][5]. It is for demonstration purposes only.*
+*This project is a work in progress and is based on our [OOPSLA'13 paper][5]. It is for demonstration purposes only.*
 
 [1]: http://code.google.com/p/morphing/wiki/MorphJ
 [2]: http://www.cs.umass.edu/~yannis/morphj-pldi08.pdf
