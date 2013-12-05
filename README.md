@@ -54,6 +54,7 @@ Description, examples and formal discussion of DelphJ:
 - [Forsaking Inheritance: Supercharged Delegation in DelphJ][5]
 
 MorphJ papers:
+- [Morphing: Structurally Shaping a Class by Reflecting on Others (TOPLAS)][6]
 - [Expressive and Safe Static Reflection with MorphJ][2]
 - [Morphing: Safely Shaping a Class in the Image of Others][3]
 - [Morphing Software for Easier Evolution][4]
@@ -65,3 +66,4 @@ MorphJ papers:
 [3]: http://www.cs.umass.edu/~yannis/mj.pdf
 [4]: http://www.cs.umass.edu/~yannis/ramse07.pdf
 [5]: http://www.di.uoa.gr/~biboudis/forsaking-inheritance-oopsla13.pdf
+[6]: http://cgi.di.uoa.gr/~smaragd/morphj-toplas.pdf
